@@ -39,5 +39,3 @@ logs/
 .DS_Store
 Thumbs.db
 
-# bash scripts
-bash/*
