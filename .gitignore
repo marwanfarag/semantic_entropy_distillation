@@ -5,37 +5,54 @@ __pycache__/
 *.so
 .Python
 *.egg-info/
-*.egg
 dist/
 build/
+*.egg
 
-# Virtual environments
+# Virtual Environment
 venv/
-.venv/
+env/
+ENV/
+.venv
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.DS_Store
 
-# Data and outputs
-*.jsonl
-*.json
-!alpaca_data.json
+# Model outputs and checkpoints
+output*/
+checkpoint*/
+*.bin
+*.safetensors
+*.pth
+*.ckpt
+
+# Teacher outputs
 teacher_outputs/
-output_*/
-checkpoints/
+*.jsonl
 
 # Logs
 logs/
 *.log
+*.out
+*.err
 
-# Model cache
+# Data files
+*.json
+!alpaca_data.json
+
+# HuggingFace cache
 .cache/
+wandb/
 
-# Jupyter
-.ipynb_checkpoints/
-
-# OS
-.DS_Store
-Thumbs.db
-
+# System
+.env
+*.pid
