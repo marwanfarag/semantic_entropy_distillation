@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Data and outputs
+*.jsonl
+*.json
+!alpaca_data.json
+teacher_outputs/
+output_*/
+checkpoints/
+
+# Logs
+logs/
+*.log
+
+# Model cache
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# bash scripts
+bash/*
