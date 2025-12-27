@@ -48,7 +48,7 @@ def check_bidirectional_entailment(
     entails_forward = result_a_to_b["entailment"] >= threshold
     entails_backward = result_b_to_a["entailment"] >= threshold
     
-    return entails_forward and entails_backward
+    return entails_forward or entails_backward
 
 
 def cluster_responses(

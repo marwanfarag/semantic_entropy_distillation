@@ -54,6 +54,8 @@ def main():
     parser.add_argument("--contradiction_weight", type=float, default=0.5)
     parser.add_argument("--max_response_tokens", type=int, default=100)
     parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--plot", action="store_true", help="Generate histogram plots after scoring")
+    parser.add_argument("--plot_dir", type=str, default="./plots", help="Directory for plots")
     args = parser.parse_args()
     
     # Load NLI model
@@ -73,36 +75,60 @@ def main():
     entries = load_teacher_outputs(args.teacher_outputs_dir)
     
     # Score each instruction
-    logger.info("Scoring instructions...")
+    logger.info(f"Starting to score {len(entries)} instructions...")
+    logger.info(f"Config: entailment_threshold={args.entailment_threshold}, "
+                f"weights=(entropy={args.entropy_weight}, contradiction={args.contradiction_weight})")
+    logger.info(f"Results will be written to {args.output_path} every 10 entries")
+    
     results = []
+    batch_results = []
     
-    for entry in tqdm(entries, desc="Scoring"):
-        instruction = entry.get("instruction", "")
-        responses = entry.get("responses", [])
-        
-        if not instruction or not responses:
-            continue
-        
-        # Compute scores
-        scores = scorer.score_instruction(instruction, responses)
-        
-        # Build result entry
-        result = {
-            "instruction": instruction,
-            "score": scores["score"],
-            "semantic_entropy": scores["semantic_entropy"],
-            "contradiction": scores["contradiction"],
-            "confidence": scores["confidence"],
-            "num_clusters": scores["num_clusters"],
-            "representative_response": scores["representative_response"],
-        }
-        results.append(result)
-    
-    # Save results
-    logger.info(f"Saving {len(results)} scored entries to {args.output_path}")
+    # Open output file in append mode
     with open(args.output_path, 'w') as f:
-        for result in results:
-            f.write(json.dumps(result) + "\n")
+        for idx, entry in enumerate(tqdm(entries, desc="Scoring"), 1):
+            instruction = entry.get("instruction", "")
+            responses = entry.get("responses", [])
+            
+            if not instruction or not responses:
+                logger.debug(f"Skipping entry {idx}: missing instruction or responses")
+                continue
+            
+            # Compute scores
+            scores = scorer.score_instruction(instruction, responses)
+            
+            # Build result entry
+            result = {
+                "instruction": instruction,
+                "score": scores["score"],
+                "semantic_entropy": scores["semantic_entropy"],
+                "contradiction": scores["contradiction"],
+                "confidence": scores["confidence"],
+                "num_clusters": scores["num_clusters"],
+                "representative_response": scores["representative_response"],
+            }
+            results.append(result)
+            batch_results.append(result)
+            
+            # Write to file every 10 entries
+            if len(batch_results) >= 10:
+                for r in batch_results:
+                    f.write(json.dumps(r) + "\n")
+                f.flush()  # Ensure it's written to disk
+                batch_results = []
+            
+            # Log progress every 50 entries
+            if idx % 50 == 0:
+                avg_score = sum(r["score"] for r in results) / len(results)
+                logger.info(f"Progress: {idx}/{len(entries)} ({idx/len(entries)*100:.1f}%) | "
+                           f"Avg score so far: {avg_score:.3f}")
+        
+        # Write any remaining results
+        if batch_results:
+            for r in batch_results:
+                f.write(json.dumps(r) + "\n")
+            f.flush()
+    
+    logger.info(f\"Saved {len(results)} scored entries to {args.output_path}")
     
     # Print summary statistics
     scores = [r["score"] for r in results]
@@ -116,6 +142,13 @@ def main():
     logger.info(f"Entropy: mean={sum(entropies)/len(entropies):.3f}")
     logger.info(f"Contradiction: mean={sum(contradictions)/len(contradictions):.3f}")
     logger.info(f"Confidence: mean={sum(confidences)/len(confidences):.3f}")
+    
+    # Generate plots if requested
+    if args.plot:
+        logger.info("Generating histogram plots...")
+        from .plot_results import plot_histograms
+        plot_histograms(results, args.plot_dir)
+        logger.info(f"Plots saved to {args.plot_dir}")
 
 
 if __name__ == "__main__":

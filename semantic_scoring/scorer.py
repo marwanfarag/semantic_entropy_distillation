@@ -65,7 +65,8 @@ class SemanticScorer:
         # Simple token count estimate (words / 0.75)
         estimated_tokens = len(response.split()) / 0.75
         
-        if estimated_tokens > self.max_response_tokens and summary:
+        # if estimated_tokens > self.max_response_tokens and summary and summary != "":
+        if estimated_tokens == 0 and summary:
             return summary
         return response
     
@@ -97,19 +98,23 @@ class SemanticScorer:
         response_texts = [r for r in response_texts if r.strip()]
         
         if not response_texts:
+            logger.warning("No valid responses for instruction: %s", instruction[:50])
             return {
-                "score": 1.0,
-                "semantic_entropy": 1.0,
-                "contradiction": 0.0,
-                "confidence": 0.0,
+                "score": 0,
+                "semantic_entropy": 0,
+                "contradiction": 0,
+                "confidence": 0,
                 "num_clusters": 0,
                 "representative_response": "",
             }
+        
+        logger.debug(f"Processing {len(response_texts)} responses")
         
         # Cluster responses by semantic equivalence
         clusters = cluster_responses(
             instruction, response_texts, self.nli_model, self.entailment_threshold
         )
+        logger.debug(f"Clustered into {len(clusters)} semantic groups")
         
         # Compute cluster probabilities
         probs = compute_cluster_probabilities(clusters)
@@ -121,18 +126,20 @@ class SemanticScorer:
         
         # Compute semantic entropy
         semantic_entropy = compute_semantic_entropy(probs)
+        logger.debug(f"Semantic entropy: {semantic_entropy:.3f}")
         
         # Compute contradiction
         contradiction = compute_overall_contradiction(
             instruction, clusters, self.nli_model, probs
         )
+        logger.debug(f"Contradiction score: {contradiction:.3f}")
         
         # Compute final weighted score
         score = (
             self.entropy_weight * semantic_entropy +
             self.contradiction_weight * contradiction
         )
-        
+
         return {
             "score": score,
             "semantic_entropy": semantic_entropy,
@@ -141,3 +148,4 @@ class SemanticScorer:
             "num_clusters": len(clusters),
             "representative_response": representative,
         }
+

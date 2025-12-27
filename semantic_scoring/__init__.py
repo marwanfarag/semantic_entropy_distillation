@@ -11,6 +11,7 @@ from .clustering import cluster_responses, check_bidirectional_entailment
 from .entropy import compute_semantic_entropy, compute_cluster_probabilities
 from .contradiction import compute_overall_contradiction
 from .scorer import SemanticScorer
+from .plot_results import plot_histograms, load_results
 
 __all__ = [
     "ScoringArguments",
@@ -21,4 +22,6 @@ __all__ = [
     "compute_cluster_probabilities",
     "compute_overall_contradiction",
     "SemanticScorer",
+    "plot_histograms",
+    "load_results",
 ]
