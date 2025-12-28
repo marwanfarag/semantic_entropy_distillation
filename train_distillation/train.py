@@ -94,7 +94,9 @@ def train():
         ))
     
     # Create trainer
+    use_weighted_loss = training_args.distillation_mode == "weighted"
     trainer = DistillationTrainer(
+        use_weighted_loss=use_weighted_loss,
         model=model, 
         tokenizer=tokenizer, 
         args=training_args,

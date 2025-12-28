@@ -47,3 +47,28 @@ class DistillationTrainingArguments(transformers.TrainingArguments):
         default=512,
         metadata={"help": "Maximum tokens to generate during validation inference."}
     )
+    
+    # Distillation mode arguments
+    distillation_mode: str = field(
+        default="random",
+        metadata={
+            "help": "Distillation mode: 'random' (random response selection) or "
+                    "'weighted' (score-weighted loss with filtering)."
+        }
+    )
+    scored_outputs_path: Optional[str] = field(
+        default=None,
+        metadata={"help": "Path to scored_outputs.jsonl for weighted mode."}
+    )
+    score_threshold: float = field(
+        default=0.8,
+        metadata={"help": "Maximum score to include samples (weighted mode only)."}
+    )
+    w_min: float = field(
+        default=0.2,
+        metadata={"help": "Minimum weight floor for focal weighting."}
+    )
+    gamma: float = field(
+        default=2.0,
+        metadata={"help": "Gamma exponent for focal weighting (higher = more aggressive)."}
+    )

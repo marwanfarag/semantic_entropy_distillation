@@ -22,7 +22,7 @@
 # Configuration
 # =====================================================
 TEACHER_OUTPUTS_DIR="./teacher_outputs"
-OUTPUT_PATH="../scored_outputs.jsonl"
+OUTPUT_PATH="./teacher_outputs/scored_outputs.jsonl"
 
 # NLI model (DeBERTa-large fine-tuned on MNLI)
 NLI_MODEL="microsoft/deberta-large-mnli"
@@ -74,7 +74,7 @@ python -m semantic_scoring.score_teacher_outputs \
     --contradiction_weight ${CONTRADICTION_WEIGHT} \
     --max_response_tokens ${MAX_RESPONSE_TOKENS} \
     --plot \
-    --plot_dir ../plots
+    --plot_dir ./plots
 
 echo ""
 echo "====================================="

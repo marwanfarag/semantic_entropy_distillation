@@ -14,14 +14,13 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --time=0:30:00
 #SBATCH --mem=8G
-#SBATCH --qos=batch
-#SBATCH --partition=stud
+#SBATCH --partition=empl
 
 # =====================================================
 # Configuration
 # =====================================================
-INPUT_PATH="../scored_outputs.jsonl"
-OUTPUT_DIR="../plots"
+INPUT_PATH="./teacher_outputs/scored_outputs.jsonl"
+OUTPUT_DIR="./plots"
 
 # =====================================================
 # Setup Environment

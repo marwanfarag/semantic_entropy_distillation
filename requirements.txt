@@ -13,5 +13,8 @@ tqdm>=4.65.0
 matplotlib>=3.7.0
 numpy>=1.24.0
 
+# Logging
+tensorboard>=2.20.0
+
 # NLI model for semantic scoring
 # Model: microsoft/deberta-large-mnli
