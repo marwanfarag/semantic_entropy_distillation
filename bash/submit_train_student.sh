@@ -9,7 +9,7 @@
 # =====================================================
 
 # Slurm parameters
-#SBATCH --job-name=weighted_kd_train_student
+#SBATCH --job-name=kd_train_student
 #SBATCH --output=logs/train_student_%j.%N.out
 #SBATCH --error=logs/train_student_%j.%N.err
 #SBATCH --ntasks=1
@@ -45,7 +45,7 @@ GAMMA=2.0             # Focal weight decay exponent
 # =====================================================
 NUM_EPOCHS=3
 BATCH_SIZE=8
-GRAD_ACCUM=32
+GRAD_ACCUM=8
 LR=2e-5
 MODEL_MAX_LENGTH=1024
 WARMUP_RATIO=0.03
@@ -72,6 +72,9 @@ mkdir -p logs
 
 # Load required modules
 module load cuda
+
+# Set PyTorch allocator to avoid fragmentation
+export PYTORCH_ALLOC_CONF=expandable_segments:True
 
 # Activate virtual environment
 pyenv activate venv
@@ -116,7 +119,7 @@ CMD="python -m train_distillation.train \
     --lr_scheduler_type cosine \
     --logging_steps 10 \
     --save_steps 10 \
-    --save_total_limit 2 \
+    --save_total_limit 1 \
     --eval_strategy steps \
     --eval_steps ${EVAL_STEPS} \
     --eval_num_samples ${EVAL_NUM_SAMPLES} \

@@ -33,7 +33,6 @@ class DataArguments:
 class DistillationTrainingArguments(transformers.TrainingArguments):
     """Training arguments for distillation."""
     cache_dir: Optional[str] = field(default=None)
-    optim: str = field(default="adamw_torch")
     model_max_length: int = field(
         default=512,
         metadata={"help": "Maximum sequence length."},
