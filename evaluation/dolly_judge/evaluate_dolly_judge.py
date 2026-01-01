@@ -56,6 +56,20 @@ def load_judge_model(model_name: str = "Qwen/Qwen2.5-14B-Instruct"):
     return model, tokenizer
 
 
+def build_instruction_key(instruction: str, context: str = "") -> str:
+    """
+    Build a consistent instruction key that matches the teacher output format.
+    
+    Teacher outputs combine instruction and context as:
+    "{instruction}\n\nInput: {context}"
+    
+    This function creates the same format for matching.
+    """
+    if context and context.strip():
+        return f"{instruction}\n\nInput: {context}"
+    return instruction
+
+
 def load_dolly_ground_truth(dolly_path: str) -> Dict[str, Dict]:
     """Load Dolly dataset with ground truth responses."""
     logger.info(f"Loading Dolly ground truth from: {dolly_path}")
@@ -64,13 +78,18 @@ def load_dolly_ground_truth(dolly_path: str) -> Dict[str, Dict]:
     from datasets import load_dataset
     dataset = load_dataset("databricks/databricks-dolly-15k", split="train")
     
-    # Build lookup by instruction
+    # Build lookup by instruction (using combined format to match teacher outputs)
     ground_truth = {}
     for example in dataset:
         instruction = example["instruction"]
-        ground_truth[instruction] = {
+        context = example.get("context", "")
+        
+        # Use combined key format to match teacher output format
+        key = build_instruction_key(instruction, context)
+        
+        ground_truth[key] = {
             "instruction": instruction,
-            "input": example.get("context", ""),
+            "input": context,
             "output": example["response"],
             "category": example.get("category", ""),
         }

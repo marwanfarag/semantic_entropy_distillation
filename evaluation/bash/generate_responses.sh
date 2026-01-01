@@ -1,37 +1,34 @@
 #!/bin/bash -l
 
 # =====================================================
-# SLURM Job: Dolly Judge Evaluation
+# SLURM Job: Generate Model Responses on Dolly
 # =====================================================
-# Evaluates model responses using Qwen 2.5 14B judge
+# Generates responses from a model checkpoint on the Dolly dataset
+# Usage: sbatch bash/generate_responses.sh <model_name>
+# Example: sbatch bash/generate_responses.sh student_weighted
 # =====================================================
 
 # Slurm parameters
-#SBATCH --job-name=dolly_judge
-#SBATCH --output=logs/dolly_judge_%j.%N.out
-#SBATCH --error=logs/dolly_judge_%j.%N.err
+#SBATCH --job-name=gen_responses
+#SBATCH --output=logs/gen_responses_%j.%N.out
+#SBATCH --error=logs/gen_responses_%j.%N.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=2-00:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --mem=64G
-#SBATCH --gpus=2
+#SBATCH --gpus=1
 #SBATCH --partition=highperf
 
 # =====================================================
 # Configuration
 # =====================================================
-MODEL_RESPONSES=$1  # Path to model responses JSONL
-MODEL_NAME=$2       # Name for output file (e.g., "student_random", "teacher_random")
-
-SCORED_OUTPUTS="./teacher_outputs/scored_outputs.jsonl"
-OUTPUT_DIR="./evaluation/dolly_judge/results"
-NUM_SAMPLES=500
+MODEL_NAME=${1:-"student_weighted"}
 
 # =====================================================
 # Setup Environment
 # =====================================================
 echo "====================================="
-echo "Dolly Judge Evaluation"
+echo "Generate Model Responses"
 echo "Model: ${MODEL_NAME}"
 echo "Job ID: ${SLURM_JOB_ID}"
 echo "Node: ${SLURM_NODELIST}"
@@ -40,7 +37,6 @@ echo "====================================="
 
 # Create directories
 mkdir -p logs
-mkdir -p ${OUTPUT_DIR}
 
 # Load modules
 module load cuda
@@ -48,27 +44,22 @@ module load cuda
 # Activate virtual environment
 pyenv activate venv
 
+# Move to project root
+cd /no_backups/m159/distillation_experiments/semantic_entropy_distillation
+
 # =====================================================
-# Run Evaluation
+# Run Response Generation
 # =====================================================
 echo ""
-echo "Model Responses: ${MODEL_RESPONSES}"
-echo "Scored Outputs: ${SCORED_OUTPUTS}"
-echo "Output: ${OUTPUT_DIR}/${MODEL_NAME}_scores.jsonl"
-echo "Num Samples: ${NUM_SAMPLES}"
+echo "Generating responses for: ${MODEL_NAME}"
 echo ""
 
-cd normal_distillation
-
-python evaluation/dolly_judge/evaluate_dolly_judge.py \
-    --model_responses ${MODEL_RESPONSES} \
-    --scored_outputs ${SCORED_OUTPUTS} \
-    --output_path ${OUTPUT_DIR}/${MODEL_NAME}_scores.jsonl \
-    --num_samples ${NUM_SAMPLES}
+python evaluation/dolly_judge/generate_responses.py \
+    --model_name ${MODEL_NAME} \
+    --use_scored_subset
 
 echo ""
 echo "====================================="
-echo "Evaluation Complete!"
+echo "Response Generation Complete!"
 echo "Finished: $(date)"
-echo "Results saved to: ${OUTPUT_DIR}/${MODEL_NAME}_scores.jsonl"
 echo "====================================="

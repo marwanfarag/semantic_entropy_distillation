@@ -5,9 +5,22 @@ Compare and visualize evaluation results across models.
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
+
+# Add parent to path for config import
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from config import RESULTS_DIR, DOLLY_JUDGE_RESULTS, MMLU_RESULTS, TRUTHFULQA_RESULTS, ANALYSIS_RESULTS
+except ImportError:
+    # Fallback defaults
+    RESULTS_DIR = "./evaluation_results"
+    DOLLY_JUDGE_RESULTS = f"{RESULTS_DIR}/dolly_judge"
+    MMLU_RESULTS = f"{RESULTS_DIR}/mmlu"
+    TRUTHFULQA_RESULTS = f"{RESULTS_DIR}/truthfulqa"
+    ANALYSIS_RESULTS = f"{RESULTS_DIR}/analysis"
 
 
 def load_dolly_scores(results_dir: Path):
@@ -22,11 +35,14 @@ def load_dolly_scores(results_dir: Path):
             for line in f:
                 results.append(json.loads(line))
         
+        if not results:
+            continue
+            
         # Stratify by uncertainty
         low, medium, high = [], [], []
         for r in results:
-            score = r["teacher_score"]
-            correctness = r["scores"]["correctness"]
+            score = r.get("teacher_score", 0)
+            correctness = r.get("scores", {}).get("correctness", 0)
             
             if score < 0.3:
                 low.append(correctness)
@@ -39,7 +55,7 @@ def load_dolly_scores(results_dir: Path):
             "low": np.mean(low) if low else 0,
             "medium": np.mean(medium) if medium else 0,
             "high": np.mean(high) if high else 0,
-            "overall": np.mean([r["scores"]["correctness"] for r in results]),
+            "overall": np.mean([r.get("scores", {}).get("correctness", 0) for r in results]),
         }
     
     return scores
@@ -49,8 +65,10 @@ def load_benchmark_scores(results_dir: Path, benchmark: str):
     """Load benchmark scores."""
     scores = {}
     
-    for score_file in results_dir.glob(f"*_{benchmark}.json"):
-        model_name = score_file.stem.replace(f"_{benchmark}", "")
+    suffix = "_mmlu.json" if benchmark == "mmlu" else "_truthfulqa.json"
+    
+    for score_file in results_dir.glob(f"*{suffix}"):
+        model_name = score_file.stem.replace(suffix.replace(".json", ""), "")
         
         with open(score_file, 'r') as f:
             data = json.loads(f.read())
@@ -149,8 +167,8 @@ def generate_report(dolly_scores, truthfulqa_scores, mmlu_scores, output_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Compare evaluation results")
-    parser.add_argument("--results_dir", default="./evaluation", help="Root results directory")
-    parser.add_argument("--output_dir", default="./evaluation/analysis", help="Output directory")
+    parser.add_argument("--results_dir", default=RESULTS_DIR, help="Root results directory")
+    parser.add_argument("--output_dir", default=ANALYSIS_RESULTS, help="Output directory")
     
     args = parser.parse_args()
     
@@ -158,20 +176,29 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Load scores
+    # Load scores (new flat structure)
     print("Loading Dolly judge scores...")
-    dolly_scores = load_dolly_scores(results_dir / "dolly_judge" / "results")
+    dolly_scores = load_dolly_scores(results_dir / "dolly_judge")
     
     print("Loading TruthfulQA scores...")
-    truthfulqa_scores = load_benchmark_scores(results_dir / "truthfulqa" / "results", "truthfulqa")
+    truthfulqa_scores = load_benchmark_scores(results_dir / "truthfulqa", "truthfulqa")
     
     print("Loading MMLU scores...")
-    mmlu_scores = load_benchmark_scores(results_dir / "mmlu_pro" / "results", "mmlu")
+    mmlu_scores = load_benchmark_scores(results_dir / "mmlu", "mmlu")
+    
+    # Check if we have any data
+    if not dolly_scores and not truthfulqa_scores and not mmlu_scores:
+        print("No evaluation results found. Please run evaluations first.")
+        return
     
     # Generate plots
-    print("Generating plots...")
-    plot_dolly_comparison(dolly_scores, output_dir / "dolly_comparison.png")
-    plot_benchmark_comparison(truthfulqa_scores, mmlu_scores, output_dir / "benchmark_comparison.png")
+    if dolly_scores:
+        print("Generating Dolly comparison plot...")
+        plot_dolly_comparison(dolly_scores, output_dir / "dolly_comparison.png")
+    
+    if truthfulqa_scores or mmlu_scores:
+        print("Generating benchmark comparison plot...")
+        plot_benchmark_comparison(truthfulqa_scores, mmlu_scores, output_dir / "benchmark_comparison.png")
     
     # Generate report
     print("Generating report...")
