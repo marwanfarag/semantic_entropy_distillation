@@ -110,30 +110,24 @@ class DistillationTrainer(Trainer):
         batch_size = logits.size(0)
         weights = weights.to(logits.device)
         
+        # Compute per-sample loss (no reduction)
         loss_fct = nn.CrossEntropyLoss(reduction='none', ignore_index=IGNORE_INDEX)
         
-        # Accumulate weighted loss sample-by-sample to avoid large allocation
-        weighted_loss_sum = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
+        # Reshape for loss computation
+        per_token_loss = loss_fct(
+            logits.reshape(-1, logits.size(-1)),
+            labels.reshape(-1)
+        )  # [batch_size * seq_len]
         
-        for i in range(batch_size):
-            # Get single sample - contiguous() on one sample is small (~500MB vs 6GB)
-            sample_logits = logits[i].contiguous()  # [seq_len, vocab_size]
-            sample_labels = labels[i].contiguous()  # [seq_len]
-            
-            # Compute per-token loss for this sample
-            sample_token_loss = loss_fct(sample_logits, sample_labels)  # [seq_len]
-            
-            # Mask out ignored tokens and compute mean
-            valid_mask = (sample_labels != IGNORE_INDEX).float()
-            sample_loss = (sample_token_loss * valid_mask).sum() / (valid_mask.sum() + epsilon)
-            
-            # Accumulate weighted loss
-            weighted_loss_sum = weighted_loss_sum + weights[i] * sample_loss
-            
-            # Explicitly free memory
-            del sample_logits, sample_labels, sample_token_loss
+        # Reshape back to [batch_size, seq_len]
+        per_token_loss = per_token_loss.reshape(batch_size, -1)
         
-        # Normalize by sum of weights
-        normalized_loss = weighted_loss_sum / (weights.sum() + epsilon)
+        # Compute per-sample loss (mean over tokens, excluding IGNORE_INDEX)
+        valid_mask = (labels != IGNORE_INDEX).float()
+        per_sample_loss = (per_token_loss * valid_mask).sum(dim=1) / (valid_mask.sum(dim=1) + epsilon)
+        
+        # Apply sample weights and normalize
+        weighted_loss = (weights * per_sample_loss).sum()
+        normalized_loss = weighted_loss / (weights.sum() + epsilon)
         
         return normalized_loss

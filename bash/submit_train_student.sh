@@ -16,7 +16,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --time=5-00:00:00
 #SBATCH --mem=128G
-#SBATCH --gpus=4
+#SBATCH --gpus=2
 #SBATCH --partition=highperf
 
 # =====================================================
@@ -45,7 +45,7 @@ GAMMA=2.0             # Focal weight decay exponent
 # =====================================================
 NUM_EPOCHS=3
 BATCH_SIZE=8
-GRAD_ACCUM=8
+GRAD_ACCUM=32
 LR=2e-5
 MODEL_MAX_LENGTH=1024
 WARMUP_RATIO=0.03
