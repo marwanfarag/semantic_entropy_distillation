@@ -14,6 +14,9 @@ from typing import List, Dict
 from tqdm import tqdm
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -219,6 +222,190 @@ def evaluate_response(
     return scores
 
 
+def plot_evaluation_results(results: List[Dict], output_dir: str):
+    """Generate and save visualization plots for evaluation results."""
+    
+    # Set style
+    sns.set_style("whitegrid")
+    plt.rcParams['figure.figsize'] = (10, 6)
+    plt.rcParams['font.size'] = 12
+    
+    # Extract data
+    correctness = []
+    helpfulness = []
+    coherence = []
+    teacher_scores = []
+    
+    for r in results:
+        scores = r.get("scores", {})
+        correctness.append(scores.get("correctness", 0))
+        helpfulness.append(scores.get("helpfulness", 0))
+        coherence.append(scores.get("coherence", 0))
+        teacher_scores.append(r.get("teacher_score", 0))
+    
+    correctness = np.array(correctness)
+    helpfulness = np.array(helpfulness)
+    coherence = np.array(coherence)
+    teacher_scores = np.array(teacher_scores)
+    
+    # 1. Score Distribution Box Plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    data_to_plot = [correctness, helpfulness, coherence]
+    bp = ax.boxplot(data_to_plot, labels=['Correctness', 'Helpfulness', 'Coherence'], patch_artist=True)
+    colors = ['#3498db', '#2ecc71', '#9b59b6']
+    for patch, color in zip(bp['boxes'], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.7)
+    ax.set_ylabel('Score (1-10)')
+    ax.set_title('Judge Score Distributions by Criterion')
+    ax.set_ylim(0, 11)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'score_distribution_boxplot.png'), dpi=150)
+    plt.close()
+    
+    # 2. Score Distribution Histograms
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    metrics = [('Correctness', correctness, '#3498db'),
+               ('Helpfulness', helpfulness, '#2ecc71'),
+               ('Coherence', coherence, '#9b59b6')]
+    
+    for ax, (name, data, color) in zip(axes, metrics):
+        ax.hist(data, bins=10, range=(0.5, 10.5), color=color, alpha=0.7, edgecolor='black')
+        ax.set_xlabel('Score')
+        ax.set_ylabel('Count')
+        ax.set_title(f'{name} Distribution')
+        ax.axvline(np.mean(data), color='red', linestyle='--', label=f'Mean: {np.mean(data):.2f}')
+        ax.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'score_distribution_histograms.png'), dpi=150)
+    plt.close()
+    
+    # 3. Scores vs Teacher Uncertainty Scatter
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    combined_score = (correctness + helpfulness + coherence) / 3
+    
+    for ax, (name, data, color) in zip(axes, metrics):
+        ax.scatter(teacher_scores, data, alpha=0.5, c=color, s=30)
+        # Add trend line
+        z = np.polyfit(teacher_scores, data, 1)
+        p = np.poly1d(z)
+        x_line = np.linspace(teacher_scores.min(), teacher_scores.max(), 100)
+        ax.plot(x_line, p(x_line), 'r--', linewidth=2, label=f'Trend')
+        ax.set_xlabel('Teacher Uncertainty Score')
+        ax.set_ylabel(f'{name} Score')
+        ax.set_title(f'{name} vs Teacher Uncertainty')
+        ax.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'scores_vs_uncertainty.png'), dpi=150)
+    plt.close()
+    
+    # 4. Combined Score vs Uncertainty
+    fig, ax = plt.subplots(figsize=(10, 6))
+    scatter = ax.scatter(teacher_scores, combined_score, alpha=0.6, c=combined_score, cmap='RdYlGn', s=50)
+    z = np.polyfit(teacher_scores, combined_score, 1)
+    p = np.poly1d(z)
+    x_line = np.linspace(teacher_scores.min(), teacher_scores.max(), 100)
+    ax.plot(x_line, p(x_line), 'b--', linewidth=2, label=f'Trend (slope: {z[0]:.3f})')
+    ax.set_xlabel('Teacher Uncertainty Score')
+    ax.set_ylabel('Average Judge Score')
+    ax.set_title('Combined Score vs Teacher Uncertainty')
+    ax.legend()
+    plt.colorbar(scatter, label='Average Score')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'combined_score_vs_uncertainty.png'), dpi=150)
+    plt.close()
+    
+    # 5. Uncertainty Band Comparison
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bands = {'Low (< 0.3)': [], 'Medium (0.3-0.6)': [], 'High (> 0.6)': []}
+    for i, score in enumerate(teacher_scores):
+        if score < 0.3:
+            bands['Low (< 0.3)'].append(i)
+        elif score < 0.6:
+            bands['Medium (0.3-0.6)'].append(i)
+        else:
+            bands['High (> 0.6)'].append(i)
+    
+    x = np.arange(3)
+    width = 0.25
+    band_names = list(bands.keys())
+    
+    for j, (name, data, color) in enumerate(metrics):
+        means = [np.mean(data[bands[b]]) if bands[b] else 0 for b in band_names]
+        stds = [np.std(data[bands[b]]) if bands[b] else 0 for b in band_names]
+        ax.bar(x + j * width, means, width, label=name, color=color, alpha=0.7, yerr=stds, capsize=3)
+    
+    ax.set_xticks(x + width)
+    ax.set_xticklabels(band_names)
+    ax.set_ylabel('Average Score')
+    ax.set_title('Average Scores by Teacher Uncertainty Band')
+    ax.legend()
+    ax.set_ylim(0, 11)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'scores_by_uncertainty_band.png'), dpi=150)
+    plt.close()
+    
+    # 6. Correlation Heatmap
+    fig, ax = plt.subplots(figsize=(8, 6))
+    corr_matrix = np.corrcoef([correctness, helpfulness, coherence, teacher_scores])
+    labels = ['Correctness', 'Helpfulness', 'Coherence', 'Teacher Uncertainty']
+    sns.heatmap(corr_matrix, annot=True, fmt='.3f', cmap='coolwarm', 
+                xticklabels=labels, yticklabels=labels, ax=ax, 
+                vmin=-1, vmax=1, center=0)
+    ax.set_title('Correlation Matrix')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'correlation_heatmap.png'), dpi=150)
+    plt.close()
+    
+    # 7. Radar/Spider Chart for Overall Performance
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(projection='polar'))
+    categories = ['Correctness', 'Helpfulness', 'Coherence']
+    values = [np.mean(correctness), np.mean(helpfulness), np.mean(coherence)]
+    values += values[:1]  # Complete the loop
+    angles = np.linspace(0, 2 * np.pi, len(categories), endpoint=False).tolist()
+    angles += angles[:1]
+    
+    ax.fill(angles, values, color='#3498db', alpha=0.25)
+    ax.plot(angles, values, color='#3498db', linewidth=2)
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(categories)
+    ax.set_ylim(0, 10)
+    ax.set_title('Overall Performance Radar Chart', y=1.08)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'radar_chart.png'), dpi=150)
+    plt.close()
+    
+    # 8. Summary Statistics
+    fig, ax = plt.subplots(figsize=(10, 6))
+    summary_data = {
+        'Metric': ['Correctness', 'Helpfulness', 'Coherence', 'Combined'],
+        'Mean': [np.mean(correctness), np.mean(helpfulness), np.mean(coherence), np.mean(combined_score)],
+        'Std': [np.std(correctness), np.std(helpfulness), np.std(coherence), np.std(combined_score)],
+        'Min': [np.min(correctness), np.min(helpfulness), np.min(coherence), np.min(combined_score)],
+        'Max': [np.max(correctness), np.max(helpfulness), np.max(coherence), np.max(combined_score)],
+    }
+    
+    ax.axis('off')
+    table = ax.table(
+        cellText=[[m, f'{mean:.2f}', f'{std:.2f}', f'{mn:.1f}', f'{mx:.1f}'] 
+                  for m, mean, std, mn, mx in zip(summary_data['Metric'], summary_data['Mean'], 
+                                                    summary_data['Std'], summary_data['Min'], summary_data['Max'])],
+        colLabels=['Metric', 'Mean', 'Std Dev', 'Min', 'Max'],
+        cellLoc='center',
+        loc='center',
+        colColours=['#f0f0f0'] * 5,
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(12)
+    table.scale(1.2, 1.8)
+    ax.set_title('Summary Statistics', fontsize=14, fontweight='bold', y=0.75)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'summary_statistics.png'), dpi=150)
+    plt.close()
+    
+    logger.info(f"Saved 8 evaluation plots to {output_dir}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate model using Qwen 2.5 14B judge")
     parser.add_argument("--model_responses", required=True, help="Path to model responses JSONL")
@@ -266,6 +453,10 @@ def main():
             f.write(json.dumps(result) + '\n')
     
     logger.info(f"Saved {len(results)} evaluation results to {args.output_path}")
+    
+    # Generate and save plots
+    plot_dir = os.path.dirname(args.output_path)
+    plot_evaluation_results(results, plot_dir)
 
 
 if __name__ == "__main__":

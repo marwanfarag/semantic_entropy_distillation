@@ -2,7 +2,6 @@
 Custom trainer for supervised fine-tuning on teacher responses.
 """
 
-import gc
 import logging
 import torch
 import torch.nn as nn
@@ -39,10 +38,7 @@ class DistillationTrainer(Trainer):
             logger.info("DistillationTrainer: Using uniform loss")
     
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        """Compute cross-entropy loss with optional sample weighting.
-        
-        Memory-optimized: avoids creating contiguous copies and frees tensors early.
-        """
+        """Compute cross-entropy loss with optional sample weighting."""
         labels = inputs.pop("labels")
         weights = inputs.pop("weights", None)
         inputs.pop("source_lens", None)  # Not needed for loss
@@ -50,32 +46,30 @@ class DistillationTrainer(Trainer):
         
         outputs = model(**inputs)
         logits = outputs.logits
-        vocab_size = logits.size(-1)
         
-        # Shift for next-token prediction (use reshape to avoid .contiguous() copy)
-        shift_labels = labels[..., 1:].reshape(-1)
+        # Shift for next-token prediction (no .contiguous() to avoid 6GB copy)
+        shift_logits = logits[..., :-1, :]
+        shift_labels = labels[..., 1:]
+        
+        # Free memory: we only need shift_logits from here on
+        if not return_outputs:
+            del logits
+            del outputs
         
         if self.use_weighted_loss and weights is not None:
-            # Per-sample weighted loss (pass unshifted logits, shift inside)
-            loss = self._compute_weighted_loss(logits, labels, weights)
+            # Per-sample weighted loss
+            loss = self._compute_weighted_loss(shift_logits, shift_labels, weights)
             
             # Log weight statistics for TensorBoard
             if self.state.global_step % self.args.logging_steps == 0:
                 self._log_weight_stats(weights)
         else:
-            # Fused cross-entropy with reshape (avoids .contiguous() memory copy)
-            loss = nn.functional.cross_entropy(
-                logits[..., :-1, :].reshape(-1, vocab_size),
-                shift_labels,
+            # Standard cross-entropy loss
+            loss_fct = nn.CrossEntropyLoss()
+            loss = loss_fct(
+                shift_logits.reshape(-1, shift_logits.size(-1)),
+                shift_labels.reshape(-1)
             )
-        
-        # Free logits memory immediately
-        del logits
-        
-        # Periodic garbage collection to reduce fragmentation
-        if self.state.global_step % 10 == 0:
-            gc.collect()
-            torch.cuda.empty_cache()
         
         return (loss, outputs) if return_outputs else loss
     
@@ -100,13 +94,13 @@ class DistillationTrainer(Trainer):
         """
         Compute weighted cross-entropy loss with normalization.
         
+        Memory-efficient: processes one sample at a time to avoid 6GB+ allocation.
+        
         L_B = Σ w_i * L_i / (Σ w_i + ε)
         
-        Memory-optimized: processes samples individually and shifts inside.
-        
         Args:
-            logits: [batch_size, seq_len+1, vocab_size] (unshifted)
-            labels: [batch_size, seq_len+1] (unshifted)
+            logits: [batch_size, seq_len, vocab_size]
+            labels: [batch_size, seq_len]
             weights: [batch_size]
             epsilon: Small value for numerical stability
             
@@ -118,28 +112,26 @@ class DistillationTrainer(Trainer):
         
         loss_fct = nn.CrossEntropyLoss(reduction='none', ignore_index=IGNORE_INDEX)
         
-        # Process each sample individually to reduce peak memory
+        # Accumulate weighted loss sample-by-sample to avoid large allocation
         weighted_loss_sum = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
         
         for i in range(batch_size):
-            # Get single sample and apply shift for next-token prediction
-            # [seq_len, vocab_size] and [seq_len]
-            sample_logits = logits[i, :-1, :]
-            sample_labels = labels[i, 1:]
+            # Get single sample - contiguous() on one sample is small (~500MB vs 6GB)
+            sample_logits = logits[i].contiguous()  # [seq_len, vocab_size]
+            sample_labels = labels[i].contiguous()  # [seq_len]
             
-            # Compute per-token loss for this sample [seq_len]
-            token_losses = loss_fct(sample_logits, sample_labels)
+            # Compute per-token loss for this sample
+            sample_token_loss = loss_fct(sample_logits, sample_labels)  # [seq_len]
             
-            # Compute mean over valid tokens
+            # Mask out ignored tokens and compute mean
             valid_mask = (sample_labels != IGNORE_INDEX).float()
-            valid_count = valid_mask.sum() + epsilon
-            sample_loss = (token_losses * valid_mask).sum() / valid_count
+            sample_loss = (sample_token_loss * valid_mask).sum() / (valid_mask.sum() + epsilon)
             
-            # Accumulate weighted loss (detach intermediates to free graph memory)
+            # Accumulate weighted loss
             weighted_loss_sum = weighted_loss_sum + weights[i] * sample_loss
             
-            # Free intermediate tensors
-            del sample_logits, sample_labels, token_losses
+            # Explicitly free memory
+            del sample_logits, sample_labels, sample_token_loss
         
         # Normalize by sum of weights
         normalized_loss = weighted_loss_sum / (weights.sum() + epsilon)
