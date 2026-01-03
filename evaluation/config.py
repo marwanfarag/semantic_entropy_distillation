@@ -46,7 +46,7 @@ ANALYSIS_RESULTS = f"{RESULTS_DIR}/analysis"
 # Evaluation Settings
 # =============================================================================
 NUM_EVALUATION_SAMPLES = 500  # Number of samples for judge evaluation
-JUDGE_MODEL = "Qwen/Qwen3-32B-Instruct"
+JUDGE_MODEL = "Qwen/Qwen3-32B"
 
 # Uncertainty thresholds for stratification
 UNCERTAINTY_LOW = 0.3

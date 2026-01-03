@@ -67,17 +67,16 @@ def evaluate_mcq(model, tokenizer, question: str, choices: List[str], correct_id
     correct_answer = chr(65 + correct_idx)
     is_correct = predicted_answer == correct_answer
     
-    if debug:
-        print("\n" + "="*80)
-        print(f"QUESTION: {question}")
-        print(f"CHOICES:")
-        for i, c in enumerate(choices):
-            marker = " ✓" if chr(65+i) == correct_answer else ""
-            print(f"  {chr(65+i)}. {c}{marker}")
-        print(f"\nMODEL OUTPUT: '{response}'")
-        print(f"PARSED ANSWER: '{predicted_answer}' | CORRECT: '{correct_answer}' | {'✓ CORRECT' if is_correct else '✗ WRONG'}")
-        print("="*80)
-        sys.stdout.flush()
+    print("\n" + "="*80)
+    print(f"QUESTION: {question}")
+    print(f"CHOICES:")
+    for i, c in enumerate(choices):
+        marker = " ✓" if chr(65+i) == correct_answer else ""
+        print(f"  {chr(65+i)}. {c}{marker}")
+    print(f"\nMODEL OUTPUT: '{response}'")
+    print(f"PARSED ANSWER: '{predicted_answer}' | CORRECT: '{correct_answer}' | {'✓ CORRECT' if is_correct else '✗ WRONG'}")
+    print("="*80)
+    sys.stdout.flush()
     
     return is_correct
 

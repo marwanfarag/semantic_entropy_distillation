@@ -1,86 +1,147 @@
-# Knowledge Distillation: LLaMA 3.2 3B from LLaMA 3.1 8B
+# Evaluation Package
 
-This folder contains scripts for training a LLaMA 3.2 3B student model using knowledge distillation from a LLaMA 3.1 8B teacher model on the Alpaca dataset.
+Evaluation infrastructure for comparing **Weighted vs Random distillation** models.
 
-## Files
+## Models Being Compared
 
-| File | Description |
-|------|-------------|
-| `generate_teacher_responses.py` | Generates teacher responses and logits for offline distillation |
-| `train_distillation.py` | Trains student model with KL divergence + CE loss |
-| `submit_teacher_generation.sh` | SLURM job for teacher generation |
-| `submit_train_student.sh` | SLURM job for offline distillation training |
-| `submit_online_train.sh` | SLURM job for online distillation (both models loaded) |
+| Model | Path | Description |
+|-------|------|-------------|
+| `student_weighted` | `/no_backups/m159/distillation_experiments/distillation_weighted` | Llama 3B distilled with uncertainty-weighted loss |
+| `student_random` | `/no_backups/m159/distillation_experiments/distillation_random/checkpoint-90` | Llama 3B distilled with standard loss |
+| `teacher` | `meta-llama/Llama-3.1-8B-Instruct` | Teacher model (8B) for baseline comparison |
 
-## Quick Start
+## Directory Structure
 
-### Two-Stage Pipeline (Recommended)
-
-**Stage 1: Generate teacher responses and logits**
-```bash
-cd /usrhomes/m159/stanford_alpaca/normal_distillation
-sbatch submit_teacher_generation.sh
+```
+evaluation/
+├── bash/                           # All SLURM submission scripts
+│   ├── generate_responses.sh       # Generate model responses on Dolly
+│   ├── run_dolly_judge.sh          # Run LLM judge evaluation
+│   ├── run_mmlu.sh                 # Run MMLU benchmark
+│   ├── run_truthfulqa.sh           # Run TruthfulQA benchmark
+│   └── run_comparison.sh           # Compare all results
+├── dolly_judge/                    # LLM-as-judge evaluation
+│   ├── generate_responses.py       # Generate responses from checkpoints
+│   └── evaluate_dolly_judge.py     # Judge scoring with Qwen 2.5 14B
+├── mmlu/                           # MMLU evaluation
+│   └── evaluate_mmlu.py
+├── truthfulqa/                     # TruthfulQA evaluation
+│   └── evaluate_truthfulqa.py
+├── analysis/                       # Result comparison
+│   └── compare_results.py
+├── config.py                       # Centralized configuration
+└── README.md
 ```
 
-**Stage 2: Train student with offline distillation** (after Stage 1 completes)
-```bash
-sbatch submit_train_student.sh
-```
+## Complete Evaluation Pipeline
 
-### Single-Stage Online Distillation
+### Step 1: Generate Model Responses
 
-If you have enough GPU memory (2x A5000 or better):
-```bash
-sbatch submit_online_train.sh
-```
-
-## Monitoring Jobs
+First, generate responses from each model checkpoint on the Dolly dataset:
 
 ```bash
-# Check job status
-squeue -u $USER
+# Generate responses for weighted distillation model
+sbatch evaluation/bash/generate_responses.sh student_weighted
 
-# Check job output
-tail -f logs/teacher_gen_*.out
-tail -f logs/train_student_*.out
-
-# Cancel a job
-scancel <job_id>
+# Generate responses for random distillation model  
+sbatch evaluation/bash/generate_responses.sh student_random
 ```
+
+This creates JSONL files in `/no_backups/m159/distillation_experiments/evaluation_results/model_responses/`.
+
+### Step 2: Run Judge Evaluation (Dolly)
+
+Evaluate the generated responses using Qwen 2.5 14B as judge:
+
+```bash
+# Wait for Step 1 to complete, then:
+sbatch evaluation/bash/run_dolly_judge.sh student_weighted
+sbatch evaluation/bash/run_dolly_judge.sh student_random
+```
+
+Outputs:
+- `*_scores.jsonl`: Per-sample judge scores (correctness, helpfulness, coherence)
+- Visualization plots (box plots, histograms, correlation heatmaps, etc.)
+
+### Step 3: Run Benchmark Evaluations
+
+Evaluate directly on standard benchmarks:
+
+```bash
+# MMLU
+sbatch evaluation/bash/run_mmlu.sh student_weighted
+sbatch evaluation/bash/run_mmlu.sh student_random
+sbatch evaluation/bash/run_mmlu.sh teacher
+
+# TruthfulQA
+sbatch evaluation/bash/run_truthfulqa.sh student_weighted
+sbatch evaluation/bash/run_truthfulqa.sh student_random
+sbatch evaluation/bash/run_truthfulqa.sh teacher
+```
+
+### Step 4: Compare Results
+
+Generate comparison plots and final report:
+
+```bash
+sbatch evaluation/bash/run_comparison.sh
+```
+
+Outputs:
+- `evaluation_results/analysis/dolly_comparison.png` - Scores by uncertainty band
+- `evaluation_results/analysis/benchmark_comparison.png` - MMLU/TruthfulQA accuracies
+- `evaluation_results/analysis/evaluation_report.md` - Summary markdown report
 
 ## Configuration
 
-### Distillation Hyperparameters
+All paths are centralized in `config.py`:
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `TEMPERATURE` | 2.0 | Softening factor for logits in KL divergence |
-| `ALPHA` | 0.5 | Weight for KL loss (1-α for CE loss) |
+```python
+from evaluation.config import MODELS, RESULTS_DIR, SCORED_OUTPUTS
 
-### Training Hyperparameters (Alpaca defaults)
+print(MODELS["student_weighted"])  # Model checkpoint path
+print(RESULTS_DIR)                 # Output directory
+```
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `NUM_EPOCHS` | 3 | Number of training epochs |
-| `BATCH_SIZE` | 4 | Per-device batch size |
-| `GRAD_ACCUM` | 8 | Gradient accumulation steps |
-| `LR` | 2e-5 | Learning rate |
-| `MODEL_MAX_LENGTH` | 512 | Maximum sequence length |
+## Output Structure
 
-## GPU Requirements
+```
+/no_backups/m159/distillation_experiments/evaluation_results/
+├── model_responses/
+│   ├── student_weighted_responses.jsonl
+│   └── student_random_responses.jsonl
+├── dolly_judge/
+│   ├── student_weighted_scores.jsonl
+│   ├── student_random_scores.jsonl
+│   ├── score_distribution_boxplot.png
+│   ├── scores_vs_uncertainty.png
+│   └── ... (8 plots per model)
+├── mmlu/
+│   ├── student_weighted_mmlu.json
+│   ├── student_random_mmlu.json
+│   └── teacher_mmlu.json
+├── truthfulqa/
+│   ├── student_weighted_truthfulqa.json
+│   ├── student_random_truthfulqa.json
+│   └── teacher_truthfulqa.json
+└── analysis/
+    ├── dolly_comparison.png
+    ├── benchmark_comparison.png
+    └── evaluation_report.md
+```
 
-| Mode | GPUs | GPU Memory | Recommended |
-|------|------|------------|-------------|
-| Teacher Generation | 1 | ~24GB | A5000/A6000 |
-| Offline Training | 1 | ~12GB | Any |
-| Online Training | 2 | ~48GB total | A5000/A6000 |
+## Key Metrics
 
-## Output
+### Dolly Judge (Stratified by Teacher Uncertainty)
+- **Correctness** (1-10): Factual accuracy
+- **Helpfulness** (1-10): Usefulness of response
+- **Coherence** (1-10): Clarity and structure
 
-- **Teacher outputs**: `./teacher_outputs/`
-  - `alpaca_teacher_responses.json` - Teacher text responses
-  - `logits/` - Pre-computed teacher logits (compressed numpy)
-  
-- **Trained model**: `./output_distillation/`
-  - Final student checkpoint
-  - Training logs
+Scores are broken down by uncertainty band:
+- **Low** (< 0.3): Teacher was confident
+- **Medium** (0.3-0.6): Moderate uncertainty
+- **High** (> 0.6): Teacher was uncertain
+
+### Benchmarks
+- **MMLU**: Multi-task accuracy (5-shot)
+- **TruthfulQA**: Truthfulness in MCQ setting

@@ -11,7 +11,7 @@
 # =====================================================
 
 # Slurm parameters
-#SBATCH --job-name=dolly_judge
+#SBATCH --job-name=random_32b_dolly_judge
 #SBATCH --output=logs/dolly_judge_%j.%N.out
 #SBATCH --error=logs/dolly_judge_%j.%N.err
 #SBATCH --ntasks=1
@@ -24,8 +24,8 @@
 # =====================================================
 # Configuration
 # =====================================================
-MODEL_NAME=${1:-"student_weighted"}
-JUDGE_MODEL=${2:-"Qwen/Qwen3-32B-Instruct"}
+MODEL_NAME=${1:-"student_random"}
+JUDGE_MODEL=${2:-"Qwen/Qwen3-32B"}
 
 # Paths (should match config.py)
 EXPERIMENT_DIR="/no_backups/m159/distillation_experiments"
@@ -57,7 +57,7 @@ module load cuda
 pyenv activate venv
 
 # Move to project root
-cd /no_backups/m159/distillation_experiments/semantic_entropy_distillation
+cd /usrhomes/m159/stanford_alpaca/normal_distillation
 
 # =====================================================
 # Run Evaluation
@@ -85,7 +85,8 @@ python evaluation/dolly_judge/evaluate_dolly_judge.py \
     --model_responses ${MODEL_RESPONSES} \
     --scored_outputs ${SCORED_OUTPUTS} \
     --output_path ${OUTPUT_PATH} \
-    --judge_model ${JUDGE_MODEL}
+    --judge_model ${JUDGE_MODEL} \
+    --num_samples 2808
 
 echo ""
 echo "====================================="

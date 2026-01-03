@@ -9,20 +9,20 @@
 # =====================================================
 
 # Slurm parameters
-#SBATCH --job-name=mmlu_eval
+#SBATCH --job-name=random_mmlu_eval
 #SBATCH --output=logs/mmlu_%j.%N.out
 #SBATCH --error=logs/mmlu_%j.%N.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=1-00:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --mem=64G
 #SBATCH --gpus=1
-#SBATCH --partition=highperf
+#SBATCH --partition=empl
 
 # =====================================================
 # Configuration
 # =====================================================
-MODEL_NAME=${1:-"student_weighted"}
+MODEL_NAME=${1:-"student_random"}
 
 # Model paths (from config.py)
 declare -A MODEL_PATHS
@@ -59,7 +59,7 @@ module load cuda
 pyenv activate venv
 
 # Move to project root
-cd /no_backups/m159/distillation_experiments/semantic_entropy_distillation
+cd /usrhomes/m159/stanford_alpaca/normal_distillation
 
 # =====================================================
 # Run Evaluation
@@ -73,7 +73,8 @@ echo ""
 
 python evaluation/mmlu/evaluate_mmlu.py \
     --model_path ${MODEL_PATH} \
-    --output_path ${OUTPUT_PATH}
+    --output_path ${OUTPUT_PATH} \
+    --debug
 
 echo ""
 echo "====================================="
