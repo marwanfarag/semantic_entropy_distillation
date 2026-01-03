@@ -3,13 +3,15 @@
 # =====================================================
 # SLURM Job: Dolly Judge Evaluation
 # =====================================================
-# Evaluates model responses using Qwen 2.5 14B judge
-# Usage: sbatch bash/run_dolly_judge.sh <model_name>
-# Example: sbatch bash/run_dolly_judge.sh student_weighted
+# Evaluates model responses using LLM judge
+# Usage: sbatch bash/run_dolly_judge.sh <model_name> [judge_model]
+# Examples: 
+#   sbatch bash/run_dolly_judge.sh student_weighted
+#   sbatch bash/run_dolly_judge.sh student_random "Qwen/Qwen2.5-14B-Instruct"
 # =====================================================
 
 # Slurm parameters
-#SBATCH --job-name=dolly_judge
+#SBATCH --job-name=random_32b_dolly_judge
 #SBATCH --output=logs/dolly_judge_%j.%N.out
 #SBATCH --error=logs/dolly_judge_%j.%N.err
 #SBATCH --ntasks=1
@@ -22,14 +24,15 @@
 # =====================================================
 # Configuration
 # =====================================================
-MODEL_NAME=${1:-"student_weighted"}
+MODEL_NAME=${1:-"student_random"}
+JUDGE_MODEL=${2:-"Qwen/Qwen3-32B"}
 
 # Paths (should match config.py)
 EXPERIMENT_DIR="/no_backups/m159/distillation_experiments"
 RESULTS_DIR="${EXPERIMENT_DIR}/evaluation_results"
 RESPONSES_DIR="${RESULTS_DIR}/model_responses"
 DOLLY_RESULTS="${RESULTS_DIR}/dolly_judge"
-SCORED_OUTPUTS="${EXPERIMENT_DIR}/teacher_outputs/scored_outputs.jsonl"
+SCORED_OUTPUTS="/usrhomes/m159/stanford_alpaca/normal_distillation/teacher_outputs/scored_outputs.jsonl"
 
 # =====================================================
 # Setup Environment
@@ -37,6 +40,7 @@ SCORED_OUTPUTS="${EXPERIMENT_DIR}/teacher_outputs/scored_outputs.jsonl"
 echo "====================================="
 echo "Dolly Judge Evaluation"
 echo "Model: ${MODEL_NAME}"
+echo "Judge: ${JUDGE_MODEL}"
 echo "Job ID: ${SLURM_JOB_ID}"
 echo "Node: ${SLURM_NODELIST}"
 echo "Started: $(date)"
@@ -53,13 +57,16 @@ module load cuda
 pyenv activate venv
 
 # Move to project root
-cd /no_backups/m159/distillation_experiments/semantic_entropy_distillation
+cd /usrhomes/m159/stanford_alpaca/normal_distillation
 
 # =====================================================
 # Run Evaluation
 # =====================================================
 MODEL_RESPONSES="${RESPONSES_DIR}/${MODEL_NAME}_responses.jsonl"
-OUTPUT_PATH="${DOLLY_RESULTS}/${MODEL_NAME}_scores.jsonl"
+
+# Extract judge model name (e.g., "Qwen/Qwen3-32B-Instruct" -> "qwen3_32b")
+JUDGE_NAME=$(echo ${JUDGE_MODEL} | sed 's/.*\///' | sed 's/-Instruct//' | tr '[:upper:]' '[:lower:]' | tr '.' '_')
+OUTPUT_PATH="${DOLLY_RESULTS}/${MODEL_NAME}_${JUDGE_NAME}_scores.jsonl"
 
 echo ""
 echo "Model Responses: ${MODEL_RESPONSES}"
@@ -78,7 +85,8 @@ python evaluation/dolly_judge/evaluate_dolly_judge.py \
     --model_responses ${MODEL_RESPONSES} \
     --scored_outputs ${SCORED_OUTPUTS} \
     --output_path ${OUTPUT_PATH} \
-    --num_samples 500
+    --judge_model ${JUDGE_MODEL} \
+    --num_samples 2808
 
 echo ""
 echo "====================================="

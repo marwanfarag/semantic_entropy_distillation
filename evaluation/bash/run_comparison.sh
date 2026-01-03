@@ -15,7 +15,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --time=00:30:00
 #SBATCH --mem=16G
-#SBATCH --partition=short
+#SBATCH --partition=empl
 
 # =====================================================
 # Configuration
@@ -41,8 +41,7 @@ mkdir -p ${ANALYSIS_DIR}
 pyenv activate venv
 
 # Move to project root
-cd /no_backups/m159/distillation_experiments/semantic_entropy_distillation
-
+cd /usrhomes/m159/stanford_alpaca/normal_distillation
 # =====================================================
 # Run Comparison
 # =====================================================

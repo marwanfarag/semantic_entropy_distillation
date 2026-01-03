@@ -191,10 +191,10 @@ def main():
         print("No evaluation results found. Please run evaluations first.")
         return
     
-    # Generate plots
-    if dolly_scores:
-        print("Generating Dolly comparison plot...")
-        plot_dolly_comparison(dolly_scores, output_dir / "dolly_comparison.png")
+    # # Generate plots
+    # if dolly_scores:
+    #     print("Generating Dolly comparison plot...")
+    #     plot_dolly_comparison(dolly_scores, output_dir / "dolly_comparison.png")
     
     if truthfulqa_scores or mmlu_scores:
         print("Generating benchmark comparison plot...")

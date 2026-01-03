@@ -20,7 +20,7 @@ BASE_MODEL = "meta-llama/Llama-3.2-3B-Instruct"
 # Data Paths
 # =============================================================================
 EXPERIMENT_DIR = "/no_backups/m159/distillation_experiments"
-TEACHER_OUTPUTS_DIR = f"{EXPERIMENT_DIR}/teacher_outputs"
+TEACHER_OUTPUTS_DIR = "/usrhomes/m159/stanford_alpaca/normal_distillation/teacher_outputs"
 SCORED_OUTPUTS = f"{TEACHER_OUTPUTS_DIR}/scored_outputs.jsonl"
 
 # Teacher response files (with multiple responses per instruction)
@@ -46,7 +46,7 @@ ANALYSIS_RESULTS = f"{RESULTS_DIR}/analysis"
 # Evaluation Settings
 # =============================================================================
 NUM_EVALUATION_SAMPLES = 500  # Number of samples for judge evaluation
-JUDGE_MODEL = "Qwen/Qwen2.5-14B-Instruct"
+JUDGE_MODEL = "Qwen/Qwen3-32B"
 
 # Uncertainty thresholds for stratification
 UNCERTAINTY_LOW = 0.3

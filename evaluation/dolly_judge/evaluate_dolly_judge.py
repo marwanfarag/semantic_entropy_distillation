@@ -38,9 +38,11 @@ Evaluate the model's response on the following criteria (1-10 scale):
 2. Helpfulness: Does the response provide useful and relevant information?
 3. Coherence: Is the response well-structured, clear, and easy to understand?
 
+Special case: If the model response is essentially "I don't know" or refuses to answer, assign a score of 5 for all three metrics (correctness, helpfulness, coherence).
+
 Provide your scores in JSON format:
 {{"correctness": X, "helpfulness": Y, "coherence": Z, "justification": "brief explanation"}}
-
+Your answer should ONLY contain the JSON object.
 Your evaluation:"""
 
 
@@ -156,6 +158,9 @@ def stratified_sample(
     common_instructions = set(ground_truth.keys()) & set(model_responses.keys()) & set(teacher_scores.keys())
     logger.info(f"Found {len(common_instructions)} common instructions")
     
+    # Sort for deterministic order (sets are unordered)
+    common_instructions = sorted(list(common_instructions))
+    
     # Stratify by uncertainty bands
     low, medium, high = [], [], []
     for instruction in common_instructions:
@@ -173,12 +178,25 @@ def stratified_sample(
     import random
     random.seed(42)
     
-    samples_per_band = num_samples // 3
-    sampled_instructions = (
-        random.sample(low, min(samples_per_band, len(low))) +
-        random.sample(medium, min(samples_per_band, len(medium))) +
-        random.sample(high, min(samples_per_band, len(high)))
-    )
+    total_available = len(low) + len(medium) + len(high)
+    # print the number of available samples
+    logger.info(f"Total available samples: {total_available}")
+    
+    if num_samples is None or num_samples >= total_available:
+        # Use all available samples
+        if num_samples is None:
+            logger.info(f"Using all {total_available} available samples")
+        else:
+            logger.warning(f"Requested {num_samples} samples but only {total_available} available. Using all.")
+        sampled_instructions = low + medium + high
+    else:
+        # Sample proportionally from each band
+        samples_per_band = num_samples // 3
+        sampled_instructions = (
+            random.sample(low, min(samples_per_band, len(low))) +
+            random.sample(medium, min(samples_per_band, len(medium))) +
+            random.sample(high, min(samples_per_band, len(high)))
+        )
     
     # Build sample list
     samples = []
@@ -224,19 +242,60 @@ def evaluate_response(
     
     response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
     
-    # Parse JSON from response
+    # Parse JSON from response (extract first valid JSON object, ignore extra text)
     try:
-        # Extract JSON from response
         import re
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            scores = json.loads(json_match.group())
-        else:
-            logger.warning(f"Could not parse JSON from judge response: {response}")
-            scores = {"correctness": 0, "helpfulness": 0, "coherence": 0, "justification": "Parse error"}
+        
+        # Find the first opening brace
+        start_idx = response.find('{')
+        if start_idx == -1:
+            raise ValueError("No JSON object found in response")
+        
+        # Find the matching closing brace by counting braces
+        brace_count = 0
+        end_idx = start_idx
+        for i in range(start_idx, len(response)):
+            if response[i] == '{':
+                brace_count += 1
+            elif response[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i + 1
+                    break
+        
+        # Extract and parse the JSON
+        json_str = response[start_idx:end_idx]
+        scores = json.loads(json_str)
+        
+        # Validate required fields
+        required_fields = ["correctness", "helpfulness", "coherence", "justification"]
+        if not all(field in scores for field in required_fields):
+            raise ValueError(f"Missing required fields in JSON: {scores}")
+            
+    except json.JSONDecodeError as e:
+        logger.warning(f"JSON decode error: {e}")
+        logger.warning(f"Attempted to parse: {json_str if 'json_str' in locals() else response[:200]}")
+        scores = {"correctness": 0, "helpfulness": 0, "coherence": 0, "justification": f"JSON decode error: {str(e)}"}
     except Exception as e:
         logger.warning(f"Error parsing judge response: {e}")
+        logger.warning(f"Response: {response[:200]}...")
         scores = {"correctness": 0, "helpfulness": 0, "coherence": 0, "justification": str(e)}
+    
+    import sys
+    print("\n" + "="*80)
+    print(f"INSTRUCTION: {instruction}")
+    if input_text:
+        print(f"INPUT: {input_text}")
+    print(f"\nGROUND TRUTH: {ground_truth}")
+    print(f"\nMODEL RESPONSE: {model_response}")
+    print(f"\nJUDGE OUTPUT: {response}")
+    print(f"\nPARSED SCORES:")
+    print(f"  Correctness: {scores.get('correctness', 0)}/10")
+    print(f"  Helpfulness: {scores.get('helpfulness', 0)}/10")
+    print(f"  Coherence: {scores.get('coherence', 0)}/10")
+    print(f"  Justification: {scores.get('justification', 'N/A')}")
+    print("="*80)
+    sys.stdout.flush()
     
     return scores
 
@@ -408,7 +467,7 @@ def plot_evaluation_results(results: List[Dict], output_dir: str):
     table = ax.table(
         cellText=[[m, f'{mean:.2f}', f'{std:.2f}', f'{mn:.1f}', f'{mx:.1f}'] 
                   for m, mean, std, mn, mx in zip(summary_data['Metric'], summary_data['Mean'], 
-                                                    summary_data['Std'], summary_data['Min'], summary_data['Max'])],
+                                                summary_data['Std'], summary_data['Min'], summary_data['Max'])],
         colLabels=['Metric', 'Mean', 'Std Dev', 'Min', 'Max'],
         cellLoc='center',
         loc='center',
@@ -431,8 +490,8 @@ def main():
     parser.add_argument("--dolly_path", default="databricks/databricks-dolly-15k", help="Dolly dataset path")
     parser.add_argument("--scored_outputs", required=True, help="Path to scored_outputs.jsonl for stratification")
     parser.add_argument("--output_path", required=True, help="Path to save evaluation results")
-    parser.add_argument("--num_samples", type=int, default=500, help="Number of samples to evaluate")
-    parser.add_argument("--judge_model", default="Qwen/Qwen2.5-14B-Instruct", help="Judge model name")
+    parser.add_argument("--num_samples", type=int, default=None, help="Number of samples to evaluate (default: use all available)")
+    parser.add_argument("--judge_model", default="Qwen/Qwen3-32B-Instruct", help="Judge model name")
     
     args = parser.parse_args()
     
@@ -449,7 +508,7 @@ def main():
     
     # Evaluate
     results = []
-    for sample in tqdm(samples, desc="Evaluating"):
+    for i, sample in enumerate(tqdm(samples, desc="Evaluating"), 1):
         scores = evaluate_response(
             judge_model,
             judge_tokenizer,
@@ -464,6 +523,13 @@ def main():
             "teacher_score": sample["teacher_score"],
             "scores": scores,
         })
+        
+        # Log running mean scores every 10 samples
+        if i % 10 == 0:
+            mean_correctness = np.mean([r["scores"].get("correctness", 0) for r in results])
+            mean_helpfulness = np.mean([r["scores"].get("helpfulness", 0) for r in results])
+            mean_coherence = np.mean([r["scores"].get("coherence", 0) for r in results])
+            logger.info(f"Sample {i}/{len(samples)} - Running avg: Correctness={mean_correctness:.2f}, Helpfulness={mean_helpfulness:.2f}, Coherence={mean_coherence:.2f}")
     
     # Save results
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
@@ -473,8 +539,12 @@ def main():
     
     logger.info(f"Saved {len(results)} evaluation results to {args.output_path}")
     
-    # Generate and save plots
-    plot_dir = os.path.dirname(args.output_path)
+    # Generate and save plots in subfolder based on output filename
+    # e.g., output_path = ".../student_weighted_qwen3_32b_scores.jsonl" -> plots in ".../plots/student_weighted_qwen3_32b/"
+    output_basename = os.path.splitext(os.path.basename(args.output_path))[0]  # e.g., "student_weighted_qwen3_32b_scores"
+    output_basename = output_basename.replace("_scores", "")  # e.g., "student_weighted_qwen3_32b"
+    plot_dir = os.path.join(os.path.dirname(args.output_path), "plots", output_basename)
+    os.makedirs(plot_dir, exist_ok=True)
     plot_evaluation_results(results, plot_dir)
 
 

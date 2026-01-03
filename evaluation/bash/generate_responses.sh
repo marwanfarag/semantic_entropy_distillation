@@ -9,20 +9,20 @@
 # =====================================================
 
 # Slurm parameters
-#SBATCH --job-name=gen_responses
+#SBATCH --job-name=random_gen_responses
 #SBATCH --output=logs/gen_responses_%j.%N.out
 #SBATCH --error=logs/gen_responses_%j.%N.err
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --time=1-00:00:00
-#SBATCH --mem=64G
+#SBATCH --cpus-per-task=4
+#SBATCH --time=2-00:00:00
+#SBATCH --mem=128G
 #SBATCH --gpus=1
-#SBATCH --partition=highperf
+#SBATCH --partition=empl
 
 # =====================================================
 # Configuration
 # =====================================================
-MODEL_NAME=${1:-"student_weighted"}
+MODEL_NAME=student_random
 
 # =====================================================
 # Setup Environment
@@ -45,7 +45,7 @@ module load cuda
 pyenv activate venv
 
 # Move to project root
-cd /no_backups/m159/distillation_experiments/semantic_entropy_distillation
+cd /usrhomes/m159/stanford_alpaca/normal_distillation
 
 # =====================================================
 # Run Response Generation

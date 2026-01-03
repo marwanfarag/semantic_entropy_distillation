@@ -9,7 +9,7 @@
 # =====================================================
 
 # Slurm parameters
-#SBATCH --job-name=truthfulqa
+#SBATCH --job-name=random_truthfulqa
 #SBATCH --output=logs/truthfulqa_%j.%N.out
 #SBATCH --error=logs/truthfulqa_%j.%N.err
 #SBATCH --ntasks=1
@@ -17,12 +17,12 @@
 #SBATCH --time=1-00:00:00
 #SBATCH --mem=64G
 #SBATCH --gpus=1
-#SBATCH --partition=highperf
+#SBATCH --partition=empl
 
 # =====================================================
 # Configuration
 # =====================================================
-MODEL_NAME=${1:-"student_weighted"}
+MODEL_NAME=${1:-"student_random"}
 
 # Model paths (from config.py)
 declare -A MODEL_PATHS
@@ -59,7 +59,7 @@ module load cuda
 pyenv activate venv
 
 # Move to project root
-cd /no_backups/m159/distillation_experiments/semantic_entropy_distillation
+cd /usrhomes/m159/stanford_alpaca/normal_distillation
 
 # =====================================================
 # Run Evaluation
