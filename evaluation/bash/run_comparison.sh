@@ -41,7 +41,7 @@ mkdir -p ${ANALYSIS_DIR}
 pyenv activate venv
 
 # Move to project root
-cd /usrhomes/m159/stanford_alpaca/normal_distillation
+cd /no_backups/m159/distillation_experiments/semantic_entropy_distillation
 # =====================================================
 # Run Comparison
 # =====================================================
