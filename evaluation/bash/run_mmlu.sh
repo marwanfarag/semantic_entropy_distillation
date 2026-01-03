@@ -71,7 +71,7 @@ echo "Model Path: ${MODEL_PATH}"
 echo "Output: ${OUTPUT_PATH}"
 echo ""
 
-python evaluation/mmlu_pro/evaluate_mmlu.py \
+python evaluation/mmlu/evaluate_mmlu.py \
     --model_path ${MODEL_PATH} \
     --output_path ${OUTPUT_PATH}
 

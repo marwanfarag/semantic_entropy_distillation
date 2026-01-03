@@ -56,7 +56,8 @@ echo ""
 
 python evaluation/dolly_judge/generate_responses.py \
     --model_name ${MODEL_NAME} \
-    --use_scored_subset
+    --use_scored_subset \
+    --batch_size 8
 
 echo ""
 echo "====================================="

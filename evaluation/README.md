@@ -23,7 +23,7 @@ evaluation/
 ├── dolly_judge/                    # LLM-as-judge evaluation
 │   ├── generate_responses.py       # Generate responses from checkpoints
 │   └── evaluate_dolly_judge.py     # Judge scoring with Qwen 2.5 14B
-├── mmlu_pro/                       # MMLU evaluation
+├── mmlu/                           # MMLU evaluation
 │   └── evaluate_mmlu.py
 ├── truthfulqa/                     # TruthfulQA evaluation
 │   └── evaluate_truthfulqa.py

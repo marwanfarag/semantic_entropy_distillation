@@ -3,6 +3,8 @@ Generate Model Responses on Dolly Dataset
 
 Loads a model checkpoint and generates responses for the Dolly dataset.
 Output is saved as JSONL for subsequent evaluation by the judge.
+
+Supports batched generation for faster processing.
 """
 
 import argparse
@@ -10,7 +12,7 @@ import json
 import logging
 import os
 import sys
-from typing import Optional
+from typing import List, Dict
 from tqdm import tqdm
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -31,6 +33,7 @@ def load_model(model_path: str):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"  # Important for batch generation
     
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
@@ -76,19 +79,19 @@ def format_prompt(instruction: str, input_text: str = "") -> str:
 """
 
 
-def generate_response(
+def generate_batch(
     model,
     tokenizer,
-    instruction: str,
-    input_text: str = "",
+    batch_prompts: List[str],
     max_new_tokens: int = 512,
-) -> str:
-    """Generate a response for the given instruction."""
-    prompt = format_prompt(instruction, input_text)
+) -> List[str]:
+    """Generate responses for a batch of prompts."""
     
+    # Tokenize batch with padding
     inputs = tokenizer(
-        prompt,
+        batch_prompts,
         return_tensors="pt",
+        padding=True,
         truncation=True,
         max_length=2048,
     ).to(model.device)
@@ -103,12 +106,18 @@ def generate_response(
             pad_token_id=tokenizer.pad_token_id,
         )
     
-    response = tokenizer.decode(
-        outputs[0][inputs.input_ids.shape[1]:],
-        skip_special_tokens=True
-    ).strip()
+    # Decode responses (skip input tokens)
+    responses = []
+    for i, output in enumerate(outputs):
+        # Find where the input ends for this sample
+        input_len = inputs.input_ids[i].ne(tokenizer.pad_token_id).sum().item()
+        response = tokenizer.decode(
+            output[input_len:],
+            skip_special_tokens=True
+        ).strip()
+        responses.append(response)
     
-    return response
+    return responses
 
 
 def load_evaluation_instructions(scored_outputs_path: str) -> set:
@@ -141,6 +150,12 @@ def main():
         "--output_dir",
         default=RESPONSES_DIR,
         help="Directory to save responses"
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=8,
+        help="Batch size for generation (default: 8)"
     )
     parser.add_argument(
         "--max_samples",
@@ -176,7 +191,7 @@ def main():
     # Optionally filter to scored subset (using combined instruction key format)
     if args.use_scored_subset:
         scored_instructions = load_evaluation_instructions(SCORED_OUTPUTS)
-        # Filter using the combined format that matches scored_outputs.json
+        # Filter using the combined format that matches scored_outputs.jsonl
         dataset = dataset.filter(
             lambda x: build_instruction_key(x["instruction"], x.get("context", "")) in scored_instructions
         )
@@ -191,34 +206,57 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     output_path = os.path.join(args.output_dir, f"{args.model_name}_responses.jsonl")
     
-    # Generate responses
-    logger.info(f"Generating responses, saving to: {output_path}")
+    # Generate responses in batches
+    logger.info(f"Generating responses with batch_size={args.batch_size}, saving to: {output_path}")
+    
+    # Convert to list for batching
+    examples = list(dataset)
+    total_batches = (len(examples) + args.batch_size - 1) // args.batch_size
     
     with open(output_path, 'w') as f:
-        for example in tqdm(dataset, desc=f"Generating ({args.model_name})"):
-            instruction = example["instruction"]
-            input_text = example.get("context", "")
+        for batch_idx in tqdm(range(total_batches), desc=f"Generating ({args.model_name})"):
+            start_idx = batch_idx * args.batch_size
+            end_idx = min(start_idx + args.batch_size, len(examples))
+            batch_examples = examples[start_idx:end_idx]
             
-            response = generate_response(
+            # Prepare batch prompts
+            batch_prompts = []
+            batch_metadata = []
+            for example in batch_examples:
+                instruction = example["instruction"]
+                input_text = example.get("context", "")
+                prompt = format_prompt(instruction, input_text)
+                batch_prompts.append(prompt)
+                batch_metadata.append({
+                    "instruction": instruction,
+                    "input": input_text,
+                    "category": example.get("category", ""),
+                })
+            
+            # Generate batch
+            responses = generate_batch(
                 model, tokenizer,
-                instruction, input_text,
+                batch_prompts,
                 max_new_tokens=args.max_new_tokens
             )
             
-            # Use combined instruction key to match teacher output format
-            instruction_key = build_instruction_key(instruction, input_text)
+            # Write results
+            for metadata, response in zip(batch_metadata, responses):
+                # Use combined instruction key to match teacher output format
+                instruction_key = build_instruction_key(metadata["instruction"], metadata["input"])
+                
+                result = {
+                    "instruction": instruction_key,  # Combined format for matching
+                    "input": metadata["input"],  # Keep separate for reference
+                    "output": response,
+                    "category": metadata["category"],
+                }
+                
+                f.write(json.dumps(result) + '\n')
             
-            result = {
-                "instruction": instruction_key,  # Combined format for matching
-                "input": input_text,  # Keep separate for reference
-                "output": response,
-                "category": example.get("category", ""),
-            }
-            
-            f.write(json.dumps(result) + '\n')
-            f.flush()  # Ensure progress is saved
+            f.flush()  # Ensure progress is saved after each batch
     
-    logger.info(f"Saved {len(dataset)} responses to {output_path}")
+    logger.info(f"Saved {len(examples)} responses to {output_path}")
 
 
 if __name__ == "__main__":
