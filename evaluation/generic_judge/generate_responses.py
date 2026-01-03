@@ -113,8 +113,6 @@ def main():
     # Dataset arguments
     parser.add_argument("--dataset", required=True,
                         help="HuggingFace dataset name (e.g., 'truthfulqa/truthful_qa')")
-    parser.add_argument("--dataset_config", default=None,
-                        help="Dataset configuration (e.g., 'generation' for TruthfulQA)")
     parser.add_argument("--split", default="validation",
                         help="Dataset split to use")
     
@@ -148,11 +146,8 @@ def main():
     model, tokenizer = load_model(args.model_path)
     
     # Load dataset
-    logger.info(f"Loading dataset: {args.dataset} (config: {args.dataset_config}, split: {args.split})")
-    if args.dataset_config:
-        dataset = load_dataset(args.dataset, args.dataset_config, split=args.split)
-    else:
-        dataset = load_dataset(args.dataset, split=args.split)
+    logger.info(f"Loading dataset: {args.dataset} (split: {args.split})")
+    dataset = load_dataset(args.dataset, split=args.split)
     
     # Limit samples if specified
     if args.max_samples:

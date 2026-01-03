@@ -26,8 +26,7 @@
 # =====================================================
 MODEL_PATH=${1:?"Error: MODEL_PATH required"}
 DATASET=${2:?"Error: DATASET required (e.g., truthfulqa/truthful_qa)"}
-DATASET_CONFIG=${3:-""}  # Optional config (e.g., "generation")
-JUDGE_MODEL=${4:-"Qwen/Qwen3-32B-Instruct"}
+JUDGE_MODEL=${3:-"Qwen/Qwen3-32B-Instruct"}
 
 # Extract model name from path
 MODEL_NAME=$(basename ${MODEL_PATH})
@@ -44,7 +43,6 @@ echo "====================================="
 echo "Generic Evaluation Pipeline"
 echo "Model: ${MODEL_NAME}"
 echo "Dataset: ${DATASET}"
-echo "Config: ${DATASET_CONFIG:-'(none)'}"
 echo "Judge: ${JUDGE_MODEL}"
 echo "Job ID: ${SLURM_JOB_ID}"
 echo "Node: ${SLURM_NODELIST}"
@@ -75,17 +73,10 @@ echo ""
 echo "Step 1: Generating responses..."
 echo "Output: ${RESPONSES_PATH}"
 
-if [ -n "${DATASET_CONFIG}" ]; then
-    CONFIG_ARG="--dataset_config ${DATASET_CONFIG}"
-else
-    CONFIG_ARG=""
-fi
-
 python evaluation/generic_judge/generate_responses.py \
     --model_path ${MODEL_PATH} \
     --model_name ${MODEL_NAME} \
     --dataset ${DATASET} \
-    ${CONFIG_ARG} \
     --split validation \
     --question_field question \
     --ground_truth_field best_answer \

@@ -35,7 +35,6 @@
 MODEL_PATH=${1:?"Error: MODEL_PATH required (HuggingFace name or local path)"}
 MODEL_NAME=${2:?"Error: MODEL_NAME required (e.g., student_weighted, llama8b)"}
 DATASET=${3:-"dolly"}  # Default to Dolly
-DATASET_CONFIG=${4:-""}  # Optional config (e.g., "generation" for TruthfulQA)
 
 # Results directory
 RESULTS_DIR="/no_backups/m159/distillation_experiments/evaluation_results"
@@ -49,7 +48,6 @@ echo "Generate Model Responses"
 echo "Model Path: ${MODEL_PATH}"
 echo "Model Name: ${MODEL_NAME}"
 echo "Dataset: ${DATASET}"
-echo "Config: ${DATASET_CONFIG:-'(none)'}"
 echo "Job ID: ${SLURM_JOB_ID}"
 echo "Node: ${SLURM_NODELIST}"
 echo "Started: $(date)"
@@ -91,17 +89,10 @@ else
     echo "Output: ${OUTPUT_PATH}"
     echo ""
     
-    if [ -n "${DATASET_CONFIG}" ]; then
-        CONFIG_ARG="--dataset_config ${DATASET_CONFIG}"
-    else
-        CONFIG_ARG=""
-    fi
-    
     python evaluation/generic_judge/generate_responses.py \
         --model_path ${MODEL_PATH} \
         --model_name ${MODEL_NAME} \
         --dataset ${DATASET} \
-        ${CONFIG_ARG} \
         --split validation \
         --question_field question \
         --ground_truth_field best_answer \
