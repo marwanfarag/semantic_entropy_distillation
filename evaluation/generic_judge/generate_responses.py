@@ -8,7 +8,6 @@ Usage:
     python evaluation/generate_responses.py \
         --model_path "meta-llama/Llama-3.1-8B-Instruct" \
         --dataset "truthfulqa/truthful_qa" \
-        --dataset_config "generation" \
         --split "validation" \
         --question_field "question" \
         --output_path "outputs/responses.jsonl"
@@ -113,6 +112,8 @@ def main():
     # Dataset arguments
     parser.add_argument("--dataset", required=True,
                         help="HuggingFace dataset name (e.g., 'truthfulqa/truthful_qa')")
+    parser.add_argument("--dataset_config", default=None,
+                        help="Dataset config (e.g., 'generation'). Auto-detected for known datasets.")
     parser.add_argument("--split", default="validation",
                         help="Dataset split to use")
     
@@ -138,6 +139,37 @@ def main():
     
     args = parser.parse_args()
     
+    # Known dataset configurations (config, split, question_field, ground_truth_field)
+    KNOWN_DATASETS = {
+        "truthfulqa/truthful_qa": {
+            "config": "generation",
+            "split": "validation",
+            "question_field": "question",
+            "ground_truth_field": "best_answer",
+        },
+        "basicv8vc/SimpleQA": {
+            "config": None,
+            "split": "test",
+            "question_field": "problem",
+            "ground_truth_field": "answer",
+        },
+    }
+    
+    # Auto-detect settings for known datasets
+    if args.dataset in KNOWN_DATASETS:
+        known = KNOWN_DATASETS[args.dataset]
+        if args.dataset_config is None:
+            args.dataset_config = known["config"]
+        if args.split == "validation" and known["split"] != "validation":
+            args.split = known["split"]
+            logger.info(f"Auto-detected split: {args.split}")
+        if args.question_field == "question" and known["question_field"] != "question":
+            args.question_field = known["question_field"]
+            logger.info(f"Auto-detected question_field: {args.question_field}")
+        if args.ground_truth_field is None:
+            args.ground_truth_field = known["ground_truth_field"]
+            logger.info(f"Auto-detected ground_truth_field: {args.ground_truth_field}")
+    
     # Set model name
     if args.model_name is None:
         args.model_name = os.path.basename(args.model_path.rstrip('/'))
@@ -146,8 +178,21 @@ def main():
     model, tokenizer = load_model(args.model_path)
     
     # Load dataset
-    logger.info(f"Loading dataset: {args.dataset} (split: {args.split})")
-    dataset = load_dataset(args.dataset, split=args.split)
+    logger.info(f"Loading dataset: {args.dataset} (config: {args.dataset_config}, split: {args.split})")
+    if args.dataset_config:
+        dataset = load_dataset(args.dataset, args.dataset_config, split=args.split)
+    else:
+        dataset = load_dataset(args.dataset, split=args.split)
+    
+    # Log available fields for debugging
+    logger.info(f"Dataset fields: {list(dataset.features.keys())}")
+    
+    # Validate that question_field exists
+    if args.question_field not in dataset.features:
+        available = list(dataset.features.keys())
+        logger.error(f"Question field '{args.question_field}' not found in dataset!")
+        logger.error(f"Available fields: {available}")
+        raise KeyError(f"Field '{args.question_field}' not found. Available: {available}")
     
     # Limit samples if specified
     if args.max_samples:
@@ -158,41 +203,40 @@ def main():
     # Create output directory
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     
-    # Generate responses
-    results = []
-    for example in tqdm(dataset, desc=f"Generating responses"):
-        # Extract fields
-        question = example[args.question_field]
-        context = example.get(args.context_field) if args.context_field else None
-        ground_truth = example.get(args.ground_truth_field) if args.ground_truth_field else None
-        
-        # Format prompt and generate
-        prompt = format_prompt(question, context)
-        response = generate_response(
-            model, tokenizer, prompt,
-            max_new_tokens=args.max_new_tokens,
-            temperature=args.temperature,
-        )
-        
-        # Store result
-        result = {
-            "question": question,
-            "response": response,
-            "model": args.model_name,
-        }
-        if context:
-            result["context"] = context
-        if ground_truth:
-            result["ground_truth"] = ground_truth
-        
-        results.append(result)
-    
-    # Save results
+    # Generate responses (write incrementally to avoid data loss)
+    count = 0
     with open(args.output_path, 'w') as f:
-        for result in results:
+        for example in tqdm(dataset, desc=f"Generating responses"):
+            # Extract fields
+            question = example[args.question_field]
+            context = example.get(args.context_field) if args.context_field else None
+            ground_truth = example.get(args.ground_truth_field) if args.ground_truth_field else None
+            
+            # Format prompt and generate
+            prompt = format_prompt(question, context)
+            response = generate_response(
+                model, tokenizer, prompt,
+                max_new_tokens=args.max_new_tokens,
+                temperature=args.temperature,
+            )
+            
+            # Store result
+            result = {
+                "question": question,
+                "response": response,
+                "model": args.model_name,
+            }
+            if context:
+                result["context"] = context
+            if ground_truth:
+                result["ground_truth"] = ground_truth
+            
+            # Write immediately to file
             f.write(json.dumps(result) + '\n')
+            f.flush()  # Ensure it's written to disk
+            count += 1
     
-    logger.info(f"Saved {len(results)} responses to {args.output_path}")
+    logger.info(f"Saved {count} responses to {args.output_path}")
 
 
 if __name__ == "__main__":

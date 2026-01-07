@@ -19,7 +19,7 @@
 # =====================================================
 
 # Slurm parameters
-#SBATCH --job-name=gen_responses
+#SBATCH --job-name=weighted_simQA/gen_responses
 #SBATCH --output=logs/gen_responses_%j.%N.out
 #SBATCH --error=logs/gen_responses_%j.%N.err
 #SBATCH --ntasks=1
@@ -27,18 +27,18 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=128G
 #SBATCH --gpus=1
-#SBATCH --partition=empl
+#SBATCH --partition=highperf
 
 # =====================================================
 # Configuration
 # =====================================================
-MODEL_PATH=${1:?"Error: MODEL_PATH required (HuggingFace name or local path)"}
-MODEL_NAME=${2:?"Error: MODEL_NAME required (e.g., student_weighted, llama8b)"}
-DATASET=${3:-"dolly"}  # Default to Dolly
+MODEL_PATH=/no_backups/m159/distillation_experiments/distillation_weighted
+MODEL_NAME=student_weighted
+DATASET=basicv8vc/SimpleQA
 
 # Results directory
-RESULTS_DIR="/no_backups/m159/distillation_experiments/evaluation_results"
-RESPONSES_DIR="${RESULTS_DIR}/responses"
+RESULTS_DIR="/no_backups/m159/distillation_experiments/evaluation_results/"
+RESPONSES_DIR="${RESULTS_DIR}/${MODEL_NAME}/${DATASET}/responses"
 
 # =====================================================
 # Setup Environment
@@ -64,7 +64,7 @@ module load cuda
 pyenv activate venv
 
 # Move to project root
-cd /no_backups/m159/distillation_experiments/semantic_entropy_distillation
+cd /usrhomes/m159/stanford_alpaca/normal_distillation
 
 # =====================================================
 # Run Response Generation
@@ -93,7 +93,7 @@ else
         --model_path ${MODEL_PATH} \
         --model_name ${MODEL_NAME} \
         --dataset ${DATASET} \
-        --split validation \
+        --split test \
         --question_field question \
         --ground_truth_field best_answer \
         --output_path ${OUTPUT_PATH}

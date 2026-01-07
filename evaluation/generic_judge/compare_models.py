@@ -2,7 +2,7 @@
 Pairwise Model Comparison Script
 
 Compares two models' responses using an LLM judge and computes win rates.
-Evaluates each response separately and compares scores.
+Evaluates each response separately and computes win rates for each metric.
 
 Usage:
     python evaluation/compare_models.py \
@@ -16,7 +16,7 @@ import argparse
 import json
 import logging
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List
 from tqdm import tqdm
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -38,11 +38,9 @@ Model Response: {model_response}
 
 Evaluate the response on the following criteria (1-10 scale):
 
-1. Correctness: Is the response factually accurate?
+1. Correctness: Is the response factually accurate? If the ground truth says that the answer is unknown or refuses to answer and the response provides an answer, assign a low score.
 2. Helpfulness: Does the response provide useful information?
 3. Coherence: Is the response well-structured and clear?
-
-Special case: If the response is "I don't know" or refuses to answer, assign 5 for all metrics.
 
 Output ONLY a JSON object:
 {{"correctness": X, "helpfulness": Y, "coherence": Z}}
@@ -66,13 +64,33 @@ def load_judge_model(model_name: str):
 
 
 def load_responses(path: str) -> Dict[str, Dict]:
-    """Load responses indexed by question."""
+    """Load responses indexed by question. Auto-detects the question field."""
     responses = {}
+    question_field = None
+    
+    # Common question field names
+    QUESTION_FIELDS = ["question", "problem", "prompt", "input", "instruction", "query"]
+    
     with open(path, 'r') as f:
         for line in f:
             if line.strip():
                 data = json.loads(line)
-                responses[data["question"]] = data
+                
+                # Auto-detect question field on first line
+                if question_field is None:
+                    for field in QUESTION_FIELDS:
+                        if field in data:
+                            question_field = field
+                            logger.info(f"Auto-detected question field: '{question_field}'")
+                            break
+                    if question_field is None:
+                        available = list(data.keys())
+                        raise KeyError(f"Could not find question field. Available fields: {available}")
+                
+                responses[data[question_field]] = data
+                # Store the question field name for later use
+                data["_question_field"] = question_field
+    
     return responses
 
 
@@ -116,18 +134,13 @@ def evaluate_response(model, tokenizer, question: str, response: str, ground_tru
         scores = json.loads(response_text[start:end])
     except Exception as e:
         logger.warning(f"Parse error: {e}")
-        scores = {"correctness": 0, "helpfulness": 0, "coherence": 0}
+        scores = {"correctness": 5, "helpfulness": 5, "coherence": 5}
     
     return scores
 
 
-def compute_combined_score(scores: Dict) -> float:
-    """Compute combined score from individual scores."""
-    return (scores.get("correctness", 0) + scores.get("helpfulness", 0) + scores.get("coherence", 0)) / 3
-
-
-def determine_winner(score_a: float, score_b: float, tie_threshold: float = 0.5) -> str:
-    """Determine winner based on combined scores."""
+def determine_metric_winner(score_a: float, score_b: float, tie_threshold: float = 0.5) -> str:
+    """Determine winner for a single metric."""
     diff = score_a - score_b
     if abs(diff) <= tie_threshold:
         return "tie"
@@ -141,30 +154,160 @@ def create_plots(results: Dict, output_dir: str, model_a_name: str, model_b_name
     """Generate comparison plots."""
     os.makedirs(output_dir, exist_ok=True)
     sns.set_style("whitegrid")
+    metrics = ['correctness', 'helpfulness', 'coherence']
     
-    # 1. Win Rate Bar Chart
+    # 1. Average Scores Bar Chart
     fig, ax = plt.subplots(figsize=(10, 6))
-    categories = [f'{model_a_name} Wins', 'Ties', f'{model_b_name} Wins']
-    values = [results["model_a_win_rate"], results["tie_rate"], results["model_b_win_rate"]]
-    colors = ['#2ecc71', '#95a5a6', '#e74c3c']
+    x = np.arange(len(metrics))
+    width = 0.35
     
-    bars = ax.bar(categories, values, color=colors, edgecolor='black', linewidth=1.2)
-    ax.set_ylabel('Rate', fontsize=12)
-    ax.set_title(f'Win Rate Comparison: {model_a_name} vs {model_b_name}', fontsize=14, fontweight='bold')
-    ax.set_ylim(0, 1)
+    means_a = [results[f'mean_{m}_a'] for m in metrics]
+    means_b = [results[f'mean_{m}_b'] for m in metrics]
     
-    # Add value labels on bars
-    for bar, val in zip(bars, values):
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
-                f'{val:.1%}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+    bars1 = ax.bar(x - width/2, means_a, width, label=model_a_name, color='#3498db')
+    bars2 = ax.bar(x + width/2, means_b, width, label=model_b_name, color='#e74c3c')
+    
+    ax.set_ylabel('Average Score', fontsize=12)
+    ax.set_title(f'Average Scores: {model_a_name} vs {model_b_name}', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels([m.capitalize() for m in metrics])
+    ax.legend()
+    ax.set_ylim(0, 10)
+    
+    for bars in [bars1, bars2]:
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2, height + 0.1,
+                   f'{height:.2f}', ha='center', va='bottom', fontsize=10)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'win_rate_comparison.png'), dpi=150)
+    plt.savefig(os.path.join(output_dir, 'average_scores.png'), dpi=150)
     plt.close()
     
-    # 2. Score Distribution Comparison
+    # 2. Per-Metric Win Rate Bar Chart
+    fig, ax = plt.subplots(figsize=(12, 6))
+    x = np.arange(len(metrics))
+    width = 0.25
+    
+    a_wins = [results[f"{m}_a_win_rate"] for m in metrics]
+    ties = [results[f"{m}_tie_rate"] for m in metrics]
+    b_wins = [results[f"{m}_b_win_rate"] for m in metrics]
+    
+    bars1 = ax.bar(x - width, a_wins, width, label=f'{model_a_name} Wins', color='#2ecc71')
+    bars2 = ax.bar(x, ties, width, label='Ties', color='#95a5a6')
+    bars3 = ax.bar(x + width, b_wins, width, label=f'{model_b_name} Wins', color='#e74c3c')
+    
+    ax.set_ylabel('Win Rate', fontsize=12)
+    ax.set_title(f'Per-Metric Win Rates: {model_a_name} vs {model_b_name}', fontsize=14, fontweight='bold')
+    ax.set_xticks(x)
+    ax.set_xticklabels([m.capitalize() for m in metrics])
+    ax.legend()
+    ax.set_ylim(0, 1)
+    
+    for bars in [bars1, bars2, bars3]:
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2, height + 0.02,
+                   f'{height:.1%}', ha='center', va='bottom', fontsize=9)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'per_metric_win_rates.png'), dpi=150)
+    plt.close()
+    
+    # 3. Score Difference Histogram (per metric)
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    metrics = ['correctness', 'helpfulness', 'coherence']
+    
+    for ax, metric in zip(axes, metrics):
+        scores_a = np.array([d["scores_a"].get(metric, 0) for d in results["details"]])
+        scores_b = np.array([d["scores_b"].get(metric, 0) for d in results["details"]])
+        diff = scores_a - scores_b  # Positive = A wins
+        
+        ax.hist(diff, bins=21, range=(-10, 10), color='#9b59b6', edgecolor='black', alpha=0.7)
+        ax.axvline(x=0, color='red', linestyle='--', linewidth=2, label='Tie line')
+        ax.set_xlabel(f'Score Difference ({model_a_name} - {model_b_name})')
+        ax.set_ylabel('Count')
+        ax.set_title(f'{metric.capitalize()} Score Difference')
+        
+        # Add stats
+        mean_diff = np.mean(diff)
+        ax.axvline(x=mean_diff, color='green', linestyle='-', linewidth=2, label=f'Mean: {mean_diff:.2f}')
+        ax.legend(fontsize=8)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'score_difference_histogram.png'), dpi=150)
+    plt.close()
+    
+    # 4. Score Category Analysis (High/Low/Middle combinations)
+    # Thresholds: Low <= 3, Middle 4-6, High >= 7
+    def categorize_score(score):
+        if score <= 3:
+            return 'low'
+        elif score >= 7:
+            return 'high'
+        else:
+            return 'middle'
+    
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    
+    for ax, metric in zip(axes, metrics):
+        categories = {
+            'A_high_B_low': 0,
+            'A_low_B_high': 0,
+            'Both_high': 0,
+            'Both_low': 0,
+            'Both_middle': 0,
+            'Other': 0,
+        }
+        
+        for d in results["details"]:
+            score_a = d["scores_a"].get(metric, 0)
+            score_b = d["scores_b"].get(metric, 0)
+            cat_a = categorize_score(score_a)
+            cat_b = categorize_score(score_b)
+            
+            if cat_a == 'high' and cat_b == 'low':
+                categories['A_high_B_low'] += 1
+            elif cat_a == 'low' and cat_b == 'high':
+                categories['A_low_B_high'] += 1
+            elif cat_a == 'high' and cat_b == 'high':
+                categories['Both_high'] += 1
+            elif cat_a == 'low' and cat_b == 'low':
+                categories['Both_low'] += 1
+            elif cat_a == 'middle' and cat_b == 'middle':
+                categories['Both_middle'] += 1
+            else:
+                categories['Other'] += 1
+        
+        labels = [
+            f'{model_a_name} High,\n{model_b_name} Low',
+            f'{model_a_name} Low,\n{model_b_name} High',
+            'Both High\n(≥7)',
+            'Both Low\n(≤3)',
+            'Both Middle\n(4-6)',
+            'Other\nCombinations'
+        ]
+        values = list(categories.values())
+        colors = ['#2ecc71', '#e74c3c', '#3498db', '#e67e22', '#95a5a6', '#bdc3c7']
+        
+        bars = ax.bar(range(len(labels)), values, color=colors, edgecolor='black')
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, fontsize=8, rotation=0)
+        ax.set_ylabel('Count')
+        ax.set_title(f'{metric.capitalize()}: Score Category Analysis', fontsize=12, fontweight='bold')
+        
+        # Add value labels
+        for bar in bars:
+            height = bar.get_height()
+            if height > 0:
+                ax.text(bar.get_x() + bar.get_width()/2, height + 0.5,
+                       f'{height}', ha='center', va='bottom', fontsize=9)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'score_category_analysis.png'), dpi=150)
+    plt.close()
+    
+    # 5. Score Distribution Comparison
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     
     for ax, metric in zip(axes, metrics):
         scores_a = [d["scores_a"].get(metric, 0) for d in results["details"]]
@@ -181,50 +324,30 @@ def create_plots(results: Dict, output_dir: str, model_a_name: str, model_b_name
     plt.savefig(os.path.join(output_dir, 'score_distributions.png'), dpi=150)
     plt.close()
     
-    # 3. Head-to-Head Scatter
-    fig, ax = plt.subplots(figsize=(8, 8))
-    combined_a = [d["combined_a"] for d in results["details"]]
-    combined_b = [d["combined_b"] for d in results["details"]]
-    
-    ax.scatter(combined_a, combined_b, alpha=0.5, s=30)
-    ax.plot([0, 10], [0, 10], 'k--', alpha=0.5, label='Tie line')
-    ax.set_xlabel(f'{model_a_name} Score')
-    ax.set_ylabel(f'{model_b_name} Score')
-    ax.set_title('Head-to-Head Score Comparison')
-    ax.set_xlim(0, 10)
-    ax.set_ylim(0, 10)
-    ax.legend()
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'head_to_head_scatter.png'), dpi=150)
-    plt.close()
-    
-    # 4. Summary Statistics Table
-    fig, ax = plt.subplots(figsize=(10, 4))
+    # 6. Summary Statistics Table
+    fig, ax = plt.subplots(figsize=(12, 5))
     ax.axis('off')
     
     table_data = [
-        ['Metric', model_a_name, model_b_name, 'Difference'],
-        ['Correctness', f"{results['mean_correctness_a']:.2f}", f"{results['mean_correctness_b']:.2f}", 
-         f"{results['mean_correctness_a'] - results['mean_correctness_b']:+.2f}"],
+        ['Metric', f'{model_a_name} Mean', f'{model_b_name} Mean', f'{model_a_name} Wins', 'Ties', f'{model_b_name} Wins'],
+        ['Correctness', f"{results['mean_correctness_a']:.2f}", f"{results['mean_correctness_b']:.2f}",
+         f"{results['correctness_a_win_rate']:.1%}", f"{results['correctness_tie_rate']:.1%}", f"{results['correctness_b_win_rate']:.1%}"],
         ['Helpfulness', f"{results['mean_helpfulness_a']:.2f}", f"{results['mean_helpfulness_b']:.2f}",
-         f"{results['mean_helpfulness_a'] - results['mean_helpfulness_b']:+.2f}"],
+         f"{results['helpfulness_a_win_rate']:.1%}", f"{results['helpfulness_tie_rate']:.1%}", f"{results['helpfulness_b_win_rate']:.1%}"],
         ['Coherence', f"{results['mean_coherence_a']:.2f}", f"{results['mean_coherence_b']:.2f}",
-         f"{results['mean_coherence_a'] - results['mean_coherence_b']:+.2f}"],
-        ['Combined', f"{results['mean_combined_a']:.2f}", f"{results['mean_combined_b']:.2f}",
-         f"{results['mean_combined_a'] - results['mean_combined_b']:+.2f}"],
+         f"{results['coherence_a_win_rate']:.1%}", f"{results['coherence_tie_rate']:.1%}", f"{results['coherence_b_win_rate']:.1%}"],
     ]
     
     table = ax.table(cellText=table_data[1:], colLabels=table_data[0],
-                     cellLoc='center', loc='center', colColours=['#f0f0f0']*4)
+                     cellLoc='center', loc='center', colColours=['#f0f0f0']*6)
     table.auto_set_font_size(False)
-    table.set_fontsize(11)
+    table.set_fontsize(10)
     table.scale(1.2, 1.8)
     
     plt.savefig(os.path.join(output_dir, 'summary_statistics.png'), dpi=150)
     plt.close()
     
-    logger.info(f"Saved 4 comparison plots to {output_dir}")
+    logger.info(f"Saved 6 comparison plots to {output_dir}")
 
 
 def main():
@@ -238,34 +361,41 @@ def main():
     parser.add_argument("--output_path", required=True, help="Path to save comparison results")
     parser.add_argument("--tie_threshold", type=float, default=0.5, help="Score difference for tie")
     parser.add_argument("--max_samples", type=int, default=None, help="Max samples to compare")
+    parser.add_argument("--log_every", type=int, default=10, help="Log running stats every N samples")
     
     args = parser.parse_args()
     
     # Set model names
     if args.model_a_name is None:
-        args.model_a_name = os.path.basename(args.model_a_path).replace('_responses.jsonl', '')
+        args.model_a_name = os.path.basename(args.model_a_path).replace('_responses.jsonl', '').replace('.jsonl', '')
     if args.model_b_name is None:
-        args.model_b_name = os.path.basename(args.model_b_path).replace('_responses.jsonl', '')
+        args.model_b_name = os.path.basename(args.model_b_path).replace('_responses.jsonl', '').replace('.jsonl', '')
     
     # Load responses
     responses_a = load_responses(args.model_a_path)
     responses_b = load_responses(args.model_b_path)
     
-    # Find common questions
-    common_questions = set(responses_a.keys()) & set(responses_b.keys())
+    # Find common questions (sorted for deterministic ordering)
+    common_questions = sorted(set(responses_a.keys()) & set(responses_b.keys()))
     logger.info(f"Found {len(common_questions)} common questions")
     
     if args.max_samples:
-        common_questions = list(common_questions)[:args.max_samples]
+        common_questions = common_questions[:args.max_samples]
     
     # Load judge
     judge_model, judge_tokenizer = load_judge_model(args.judge_model)
     
+    # Initialize per-metric win counters
+    wins = {
+        "correctness": {"a": 0, "b": 0, "tie": 0},
+        "helpfulness": {"a": 0, "b": 0, "tie": 0},
+        "coherence": {"a": 0, "b": 0, "tie": 0},
+    }
+    
     # Compare
     details = []
-    wins_a, wins_b, ties = 0, 0, 0
     
-    for question in tqdm(common_questions, desc="Comparing"):
+    for i, question in enumerate(tqdm(common_questions, desc="Comparing"), 1):
         resp_a = responses_a[question]
         resp_b = responses_b[question]
         ground_truth = resp_a.get("ground_truth", resp_b.get("ground_truth", ""))
@@ -274,17 +404,16 @@ def main():
         scores_a = evaluate_response(judge_model, judge_tokenizer, question, resp_a["response"], ground_truth)
         scores_b = evaluate_response(judge_model, judge_tokenizer, question, resp_b["response"], ground_truth)
         
-        combined_a = compute_combined_score(scores_a)
-        combined_b = compute_combined_score(scores_b)
-        
-        winner = determine_winner(combined_a, combined_b, args.tie_threshold)
-        
-        if winner == "a":
-            wins_a += 1
-        elif winner == "b":
-            wins_b += 1
-        else:
-            ties += 1
+        # Determine winner for each metric
+        metric_winners = {}
+        for metric in ["correctness", "helpfulness", "coherence"]:
+            winner = determine_metric_winner(
+                scores_a.get(metric, 0), 
+                scores_b.get(metric, 0), 
+                args.tie_threshold
+            )
+            metric_winners[metric] = winner
+            wins[metric][winner] += 1
         
         details.append({
             "question": question,
@@ -292,32 +421,73 @@ def main():
             "response_b": resp_b["response"],
             "scores_a": scores_a,
             "scores_b": scores_b,
-            "combined_a": combined_a,
-            "combined_b": combined_b,
-            "winner": winner,
+            "winners": metric_winners,
         })
+        
+        # Log each comparison with question and scores
+        question_snippet = question[:60] + "..." if len(question) > 60 else question
+        # print the question, responses and evaluation json
+        print(question) 
+        print(f"{args.model_a_name}: {resp_a['response']}")
+        print(f"{args.model_b_name}: {resp_b['response']}")
+        print(f"{args.model_a_name}: {scores_a}")
+        print(f"{args.model_b_name}: {scores_b}")
+        # print the evaluation json
+        print(metric_winners)
+        logger.info(
+            f"[{i}/{len(common_questions)}] Q: \"{question_snippet}\"\n"
+            f"  {args.model_a_name}: C={scores_a.get('correctness', 0)}, H={scores_a.get('helpfulness', 0)}, Co={scores_a.get('coherence', 0)}\n"
+            f"  {args.model_b_name}: C={scores_b.get('correctness', 0)}, H={scores_b.get('helpfulness', 0)}, Co={scores_b.get('coherence', 0)}\n"
+            f"  Winners: C={metric_winners['correctness']}, H={metric_winners['helpfulness']}, Co={metric_winners['coherence']}"
+        )
+        
+        # Log running stats every N samples
+        if i % args.log_every == 0:
+            total = i
+            logger.info(
+                f"--- Running stats after {i} samples ---\n"
+                f"  Correctness: {args.model_a_name}={wins['correctness']['a']/total:.1%}, Tie={wins['correctness']['tie']/total:.1%}, {args.model_b_name}={wins['correctness']['b']/total:.1%}\n"
+                f"  Helpfulness: {args.model_a_name}={wins['helpfulness']['a']/total:.1%}, Tie={wins['helpfulness']['tie']/total:.1%}, {args.model_b_name}={wins['helpfulness']['b']/total:.1%}\n"
+                f"  Coherence:   {args.model_a_name}={wins['coherence']['a']/total:.1%}, Tie={wins['coherence']['tie']/total:.1%}, {args.model_b_name}={wins['coherence']['b']/total:.1%}"
+            )
     
     total = len(common_questions)
     
-    # Compute statistics
+    # Compute results
     results = {
         "model_a_name": args.model_a_name,
         "model_b_name": args.model_b_name,
-        "model_a_wins": wins_a,
-        "model_b_wins": wins_b,
-        "ties": ties,
         "total": total,
-        "model_a_win_rate": wins_a / total if total > 0 else 0,
-        "model_b_win_rate": wins_b / total if total > 0 else 0,
-        "tie_rate": ties / total if total > 0 else 0,
+        # Per-metric win rates
+        "correctness_a_wins": wins["correctness"]["a"],
+        "correctness_b_wins": wins["correctness"]["b"],
+        "correctness_ties": wins["correctness"]["tie"],
+        "correctness_a_win_rate": wins["correctness"]["a"] / total if total > 0 else 0,
+        "correctness_b_win_rate": wins["correctness"]["b"] / total if total > 0 else 0,
+        "correctness_tie_rate": wins["correctness"]["tie"] / total if total > 0 else 0,
+        
+        "helpfulness_a_wins": wins["helpfulness"]["a"],
+        "helpfulness_b_wins": wins["helpfulness"]["b"],
+        "helpfulness_ties": wins["helpfulness"]["tie"],
+        "helpfulness_a_win_rate": wins["helpfulness"]["a"] / total if total > 0 else 0,
+        "helpfulness_b_win_rate": wins["helpfulness"]["b"] / total if total > 0 else 0,
+        "helpfulness_tie_rate": wins["helpfulness"]["tie"] / total if total > 0 else 0,
+        
+        "coherence_a_wins": wins["coherence"]["a"],
+        "coherence_b_wins": wins["coherence"]["b"],
+        "coherence_ties": wins["coherence"]["tie"],
+        "coherence_a_win_rate": wins["coherence"]["a"] / total if total > 0 else 0,
+        "coherence_b_win_rate": wins["coherence"]["b"] / total if total > 0 else 0,
+        "coherence_tie_rate": wins["coherence"]["tie"] / total if total > 0 else 0,
+        
+        # Mean scores
         "mean_correctness_a": np.mean([d["scores_a"].get("correctness", 0) for d in details]),
         "mean_correctness_b": np.mean([d["scores_b"].get("correctness", 0) for d in details]),
         "mean_helpfulness_a": np.mean([d["scores_a"].get("helpfulness", 0) for d in details]),
         "mean_helpfulness_b": np.mean([d["scores_b"].get("helpfulness", 0) for d in details]),
         "mean_coherence_a": np.mean([d["scores_a"].get("coherence", 0) for d in details]),
         "mean_coherence_b": np.mean([d["scores_b"].get("coherence", 0) for d in details]),
-        "mean_combined_a": np.mean([d["combined_a"] for d in details]),
-        "mean_combined_b": np.mean([d["combined_b"] for d in details]),
+        
         "details": details,
     }
     
@@ -332,14 +502,25 @@ def main():
     create_plots(results, plot_dir, args.model_a_name, args.model_b_name)
     
     # Print summary
-    logger.info("=" * 60)
-    logger.info("COMPARISON RESULTS:")
-    logger.info(f"  {args.model_a_name} wins: {wins_a} ({wins_a/total:.1%})")
-    logger.info(f"  {args.model_b_name} wins: {wins_b} ({wins_b/total:.1%})")
-    logger.info(f"  Ties: {ties} ({ties/total:.1%})")
-    logger.info(f"  Mean combined score {args.model_a_name}: {results['mean_combined_a']:.2f}")
-    logger.info(f"  Mean combined score {args.model_b_name}: {results['mean_combined_b']:.2f}")
-    logger.info("=" * 60)
+    logger.info("=" * 70)
+    logger.info("FINAL COMPARISON RESULTS:")
+    logger.info(f"  Total samples: {total}")
+    logger.info("")
+    logger.info(f"  CORRECTNESS:")
+    logger.info(f"    {args.model_a_name}: {wins['correctness']['a']} wins ({results['correctness_a_win_rate']:.1%})")
+    logger.info(f"    {args.model_b_name}: {wins['correctness']['b']} wins ({results['correctness_b_win_rate']:.1%})")
+    logger.info(f"    Ties: {wins['correctness']['tie']} ({results['correctness_tie_rate']:.1%})")
+    logger.info("")
+    logger.info(f"  HELPFULNESS:")
+    logger.info(f"    {args.model_a_name}: {wins['helpfulness']['a']} wins ({results['helpfulness_a_win_rate']:.1%})")
+    logger.info(f"    {args.model_b_name}: {wins['helpfulness']['b']} wins ({results['helpfulness_b_win_rate']:.1%})")
+    logger.info(f"    Ties: {wins['helpfulness']['tie']} ({results['helpfulness_tie_rate']:.1%})")
+    logger.info("")
+    logger.info(f"  COHERENCE:")
+    logger.info(f"    {args.model_a_name}: {wins['coherence']['a']} wins ({results['coherence_a_win_rate']:.1%})")
+    logger.info(f"    {args.model_b_name}: {wins['coherence']['b']} wins ({results['coherence_b_win_rate']:.1%})")
+    logger.info(f"    Ties: {wins['coherence']['tie']} ({results['coherence_tie_rate']:.1%})")
+    logger.info("=" * 70)
     logger.info(f"Saved results to {args.output_path}")
     logger.info(f"Saved plots to {plot_dir}")
 

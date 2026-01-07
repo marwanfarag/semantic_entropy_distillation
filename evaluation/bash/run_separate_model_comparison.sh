@@ -3,36 +3,39 @@
 # =====================================================
 # Model Comparison Script
 # =====================================================
-# Compares two models and computes win rates
+# Compares two models' responses using an LLM judge and computes win rates
+# Requires pre-generated response JSONL files from generate_responses.sh
 #
-# Usage: sbatch bash/run_model_comparison.sh <model_a_path> <model_b_path> [judge_model]
+# Usage: sbatch bash/run_model_comparison.sh <responses_a> <responses_b> [judge_model]
 # Examples:
-#   sbatch bash/run_model_comparison.sh outputs/weighted.jsonl outputs/random.jsonl
+#   sbatch bash/run_model_comparison.sh /path/to/student_weighted.jsonl /path/to/student_random.jsonl
+#   sbatch bash/run_model_comparison.sh responses/weighted.jsonl responses/random.jsonl "Qwen/Qwen3-32B-Instruct"
 # =====================================================
 
 # Slurm parameters
 #SBATCH --job-name=model_comparison
 #SBATCH --output=logs/comparison_%j.%N.out
 #SBATCH --error=logs/comparison_%j.%N.err
-#SBATCH --time=24:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --mem=80G
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:4
 #SBATCH --partition=highperf
 
 # =====================================================
 # Configuration
 # =====================================================
-MODEL_A_PATH=${1:?"Error: MODEL_A_PATH required"}
-MODEL_B_PATH=${2:?"Error: MODEL_B_PATH required"}
-JUDGE_MODEL=${3:-"Qwen/Qwen3-32B-Instruct"}
+RESPONSES_A=/no_backups/m159/distillation_experiments/evaluation_results/truthfulQA_gen/student_weighted/truthfulqa/truthful_qa/responses/student_weighted_truthfulqa_truthful_qa.jsonl
+RESPONSES_B=/no_backups/m159/distillation_experiments/evaluation_results/truthfulQA_gen/student_random/truthfulqa/truthful_qa/responses/student_random_truthfulqa_truthful_qa.jsonl
+JUDGE_MODEL=meta-llama/Meta-Llama-3-70B-Instruct
 
-# Extract model names
-MODEL_A_NAME=$(basename ${MODEL_A_PATH} | sed 's/_responses.jsonl//')
-MODEL_B_NAME=$(basename ${MODEL_B_PATH} | sed 's/_responses.jsonl//')
+# Extract model names from response filenames
+# e.g., /path/to/student_weighted_truthfulqa.jsonl -> student_weighted_truthfulqa
+MODEL_A_NAME=student_weighted
+MODEL_B_NAME=student_random
 
 # Results directory
-RESULTS_DIR="/no_backups/m159/distillation_experiments/evaluation_results"
+RESULTS_DIR="/no_backups/m159/distillation_experiments/evaluation_results/truthfulQA_gen"
 COMPARISON_DIR="${RESULTS_DIR}/comparisons"
 
 # =====================================================
@@ -40,6 +43,8 @@ COMPARISON_DIR="${RESULTS_DIR}/comparisons"
 # =====================================================
 echo "====================================="
 echo "Model Comparison"
+echo "Responses A: ${RESPONSES_A}"
+echo "Responses B: ${RESPONSES_B}"
 echo "Model A: ${MODEL_A_NAME}"
 echo "Model B: ${MODEL_B_NAME}"
 echo "Judge: ${JUDGE_MODEL}"
@@ -52,6 +57,17 @@ echo "====================================="
 mkdir -p logs
 mkdir -p ${COMPARISON_DIR}
 
+# Verify response files exist
+if [ ! -f "${RESPONSES_A}" ]; then
+    echo "ERROR: Responses file A not found at ${RESPONSES_A}"
+    exit 1
+fi
+
+if [ ! -f "${RESPONSES_B}" ]; then
+    echo "ERROR: Responses file B not found at ${RESPONSES_B}"
+    exit 1
+fi
+
 # Load modules
 module load cuda
 
@@ -59,7 +75,7 @@ module load cuda
 pyenv activate venv
 
 # Move to project root
-cd /no_backups/m159/distillation_experiments/semantic_entropy_distillation
+cd /usrhomes/m159/stanford_alpaca/normal_distillation
 
 # =====================================================
 # Run Comparison
@@ -71,8 +87,8 @@ echo "Running comparison..."
 echo "Output: ${OUTPUT_PATH}"
 
 python evaluation/generic_judge/compare_models.py \
-    --model_a_path ${MODEL_A_PATH} \
-    --model_b_path ${MODEL_B_PATH} \
+    --model_a_path ${RESPONSES_A} \
+    --model_b_path ${RESPONSES_B} \
     --model_a_name ${MODEL_A_NAME} \
     --model_b_name ${MODEL_B_NAME} \
     --judge_model ${JUDGE_MODEL} \
