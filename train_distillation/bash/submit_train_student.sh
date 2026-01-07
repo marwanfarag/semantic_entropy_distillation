@@ -101,8 +101,8 @@ echo "Training: Epochs=${NUM_EPOCHS}, BS=${BATCH_SIZE}, Accum=${GRAD_ACCUM}, LR=
 echo "Evaluation: Every ${EVAL_STEPS} steps on ${EVAL_NUM_SAMPLES} samples"
 echo ""
 
-# Change to normal_distillation directory for module imports
-cd normal_distillation
+# Change to project root directory for module imports
+cd ../..
 
 # Build command with optional weighted mode arguments
 CMD="python -m train_distillation.train \

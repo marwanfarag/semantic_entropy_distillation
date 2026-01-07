@@ -47,7 +47,8 @@ echo "Input: ${INPUT_PATH}"
 echo "Output: ${OUTPUT_DIR}"
 echo ""
 
-cd normal_distillation
+# Change to project root directory for module imports
+cd ../..
 
 python -m semantic_scoring.plot_results \
     --input ${INPUT_PATH} \

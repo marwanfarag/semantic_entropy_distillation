@@ -80,8 +80,8 @@ echo "Num Responses: ${NUM_RESPONSES}"
 echo "Data Range: ${START_IDX} to ${END_IDX:-end}"
 echo ""
 
-# Change to the normal_distillation directory
-cd /usrhomes/m159/stanford_alpaca/normal_distillation
+# Change to project root directory for module imports
+cd ../..
 hf auth login --token ${HF_TOKEN}
 
 # Build the python command with optional end_idx

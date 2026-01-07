@@ -16,7 +16,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=256G
-#SBATCH --gpus=2
+#SBATCH --gpus=4
 #SBATCH --partition=highperf
 
 
@@ -33,7 +33,7 @@ OUTPUT_DIR="./teacher_outputs"
 DATASET_TYPE="dolly"
 
 # Generation parameters
-BATCH_SIZE=64
+BATCH_SIZE=32
 MAX_NEW_TOKENS=1024
 SAVE_LOGITS=False
 NUM_RESPONSES=7
@@ -41,14 +41,14 @@ NUM_RESPONSES=7
 # Parallel generation: true=faster but more memory, false=slower but less memory
 # When true, generates all responses at once using num_return_sequences
 # When false, generates responses sequentially (one at a time)
-PARALLEL_GENERATION=false
+PARALLEL_GENERATION=true
 
 # Data range for parallel jobs (0-indexed)
 # Set these to split the dataset across multiple jobs
 # Job 1: START_IDX=0, END_IDX=26001 (first half)
 # Job 2: START_IDX=26001, END_IDX=52002 (second half)
-START_IDX=7500
-# END_IDX="7500"  # Leave empty for all remaining samples
+START_IDX=0
+END_IDX="7500"  # Leave empty for all remaining samples
 
 # =====================================================
 # Setup Environment
@@ -85,8 +85,8 @@ echo "Num Responses: ${NUM_RESPONSES}"
 echo "Data Range: ${START_IDX} to ${END_IDX:-end}"
 echo ""
 
-# Change to the normal_distillation directory
-cd /usrhomes/m159/stanford_alpaca/normal_distillation
+# Change to project root directory for module imports
+cd ../..
 hf auth login --token ${HF_TOKEN}
 
 # Build the python command with optional end_idx
@@ -102,7 +102,7 @@ CMD="python -m teacher_generation.generate \
     --parallel_generation ${PARALLEL_GENERATION} \
     --start_idx ${START_IDX} \
     --torch_dtype bfloat16 \
-    --save_every 512"
+    --save_every 32"
 
 # Add end_idx only if specified
 if [ -n "${END_IDX}" ]; then

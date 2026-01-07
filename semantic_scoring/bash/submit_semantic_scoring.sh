@@ -63,7 +63,7 @@ echo "Entailment Threshold: ${ENTAILMENT_THRESHOLD}"
 echo "Weights: Entropy=${ENTROPY_WEIGHT}, Contradiction=${CONTRADICTION_WEIGHT}"
 echo ""
 
-cd normal_distillation
+cd /usrhomes/m159/stanford_alpaca/normal_distillation
 
 python -m semantic_scoring.score_teacher_outputs \
     --teacher_outputs_dir ${TEACHER_OUTPUTS_DIR} \

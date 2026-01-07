@@ -17,38 +17,28 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=256G
 #SBATCH --gpus=4
-#SBATCH --partition=highperf
+#SBATCH --partition=empl
 
 
 # =====================================================
 # Configuration - Modify these as needed
 # =====================================================
 TEACHER_MODEL="meta-llama/Llama-3.1-8B-Instruct"
-DATA_PATH="hf://databricks/databricks-dolly-15k"
+DATA_PATH="../alpaca_data.json"
 OUTPUT_DIR="./teacher_outputs"
 
-# Dataset type: "alpaca" or "dolly"
-# - alpaca: uses instruction/input/output fields
-# - dolly: uses instruction/context/response fields
-DATASET_TYPE="dolly"
-
 # Generation parameters
-BATCH_SIZE=32
-MAX_NEW_TOKENS=1024
+BATCH_SIZE=1
+MAX_NEW_TOKENS=512
 SAVE_LOGITS=False
 NUM_RESPONSES=7
-
-# Parallel generation: true=faster but more memory, false=slower but less memory
-# When true, generates all responses at once using num_return_sequences
-# When false, generates responses sequentially (one at a time)
-PARALLEL_GENERATION=true
 
 # Data range for parallel jobs (0-indexed)
 # Set these to split the dataset across multiple jobs
 # Job 1: START_IDX=0, END_IDX=26001 (first half)
 # Job 2: START_IDX=26001, END_IDX=52002 (second half)
 START_IDX=0
-END_IDX="7500"  # Leave empty for all remaining samples
+END_IDX="26001"  # Leave empty for all remaining samples
 
 # =====================================================
 # Setup Environment
@@ -85,24 +75,22 @@ echo "Num Responses: ${NUM_RESPONSES}"
 echo "Data Range: ${START_IDX} to ${END_IDX:-end}"
 echo ""
 
-# Change to the normal_distillation directory
-cd /usrhomes/m159/stanford_alpaca/normal_distillation
+# Change to project root directory for module imports
+cd ../..
 hf auth login --token ${HF_TOKEN}
 
 # Build the python command with optional end_idx
 CMD="python -m teacher_generation.generate \
     --model_name_or_path ${TEACHER_MODEL} \
     --data_path ${DATA_PATH} \
-    --dataset_type ${DATASET_TYPE} \
     --output_dir ${OUTPUT_DIR} \
     --batch_size ${BATCH_SIZE} \
     --max_new_tokens ${MAX_NEW_TOKENS} \
     --save_logits ${SAVE_LOGITS} \
     --num_responses ${NUM_RESPONSES} \
-    --parallel_generation ${PARALLEL_GENERATION} \
     --start_idx ${START_IDX} \
     --torch_dtype bfloat16 \
-    --save_every 32"
+    --save_every 1"
 
 # Add end_idx only if specified
 if [ -n "${END_IDX}" ]; then
